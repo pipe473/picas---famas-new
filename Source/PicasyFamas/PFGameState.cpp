@@ -46,6 +46,10 @@ void APFGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(APFGameState, RoundCapServerTime);
 	DOREPLIFETIME(APFGameState, SuddenDeathEndServerTime);
 	DOREPLIFETIME(APFGameState, AlertPlayerIndex);
+	DOREPLIFETIME(APFGameState, TurnMode);
+	DOREPLIFETIME(APFGameState, TurnPlayerIndex);
+	DOREPLIFETIME(APFGameState, TurnNumber);
+	DOREPLIFETIME(APFGameState, TurnOrder);
 	DOREPLIFETIME(APFGameState, RevealedCode);
 	DOREPLIFETIME(APFGameState, LastRoundEndReason);
 	DOREPLIFETIME(APFGameState, LastRoundWinnerMask);
@@ -165,4 +169,20 @@ void APFGameState::OnRep_Phase()
 void APFGameState::OnRep_Alert()
 {
 	OnAlertChanged.Broadcast(AlertPlayerIndex);
+}
+
+void APFGameState::ServerSetTurn(uint8 PlayerIndex, int32 InTurnNumber)
+{
+	const bool bChanged = (TurnPlayerIndex != PlayerIndex);
+	TurnPlayerIndex = PlayerIndex;
+	TurnNumber = InTurnNumber;
+	if (bChanged)
+	{
+		OnRep_Turn();   // servidor listen/standalone
+	}
+}
+
+void APFGameState::OnRep_Turn()
+{
+	OnTurnChanged.Broadcast(TurnPlayerIndex);
 }

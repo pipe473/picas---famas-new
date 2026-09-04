@@ -66,6 +66,13 @@ namespace PF
 		uint8_t             GetWinnerMask() const { return WinnerMask; }
 		ERoundEndReason     GetEndReason() const { return EndReason; }
 
+		// Modo por turnos
+		bool                IsTurnBased() const { return Config.TurnMode != ETurnMode::Simultaneous; }
+		uint8_t             GetCurrentTurnPlayer() const { return CurrentTurn; }   // kNoPlayer en modo simultaneo o si nadie puede jugar
+		int32_t             GetTurnNumber() const { return TurnNumber; }
+		int32_t             GetTurnOrderCount() const { return TurnCount; }
+		uint8_t             GetTurnOrderAt(int32_t Index) const { return TurnOrder[Index]; }
+
 	private:
 		// Resolucion
 		void ResolvePending(double Now);
@@ -77,6 +84,10 @@ namespace PF
 		void ProcessDisconnects(double Now);
 		void RegisterPass(uint8_t Player, double Now, bool bCountTowardsInactivity);
 		void ResetAttemptClock(uint8_t Player, double Now);
+		void BuildTurnOrder(FRng& Rng);
+		bool CanTakeTurn(uint8_t Player) const;
+		void AdvanceTurn(double Now);            // pasa el turno al siguiente jugador elegible y arranca su reloj
+		void OnAttemptConsumed(uint8_t Player, double Now);   // tras intento o Paso: reloj nuevo (simultaneo) o siguiente turno
 		double CurrentAttemptSeconds() const;
 		void StartSuddenDeath(uint8_t TriggerPlayer, double Now);
 		void EndRound(ERoundEndReason Reason, double Now);
@@ -118,5 +129,12 @@ namespace PF
 		uint8_t         AlertPlayer = kNoPlayer;
 		double          SuddenDeathEndTime = 0.0;   // 0 = inactiva
 		ERoundEndReason EndReason = ERoundEndReason::None;
+
+		// Modo por turnos
+		uint8_t         TurnOrder[kMaxPlayers] = {};
+		int32_t         TurnCount = 0;
+		int32_t         TurnCursor = -1;
+		uint8_t         CurrentTurn = kNoPlayer;
+		int32_t         TurnNumber = 0;
 	};
 }

@@ -38,6 +38,15 @@ namespace PF
 		DeadlineExpired,   // llego fuera del reloj + margen; se registra como Paso
 		RoundOver,         // la ronda ya estaba resuelta en una pasada anterior
 		HistoryFull,
+		NotYourTurn,       // modo por turnos: solo el jugador con el turno puede enviar
+	};
+
+	// Como se reparten los intentos dentro de la ronda.
+	enum class ETurnMode : uint8_t
+	{
+		Simultaneous = 0,  // Speed Race: todos a la vez, un reloj por jugador
+		SeatOrder,         // por turnos, en orden de asiento; el reloj solo corre para quien tiene el turno
+		RandomOrder,       // por turnos, orden barajado al empezar cada ronda (determinista por semilla)
 	};
 
 	enum class EScoreReason : uint8_t
@@ -101,6 +110,7 @@ namespace PF
 		double  ReconnectGraceSeconds     = 20.0;
 		uint8_t PassesUntilInactive       = 2;
 		bool    bTeamMode                 = false;
+		ETurnMode TurnMode                = ETurnMode::Simultaneous;
 		FScoringConfig Scoring;
 	};
 
@@ -216,6 +226,7 @@ namespace PF
 		Intuition,           // Player (acerto con > 1 candidato)
 		RoundStarted,        // Time
 		RoundEnded,          // Value = ERoundEndReason, Player = ganador (o kNoPlayer), Guess = codigo
+		TurnChanged,         // modo por turnos: Player = quien tiene el turno (kNoPlayer si nadie), Value = numero de turno, Time = fin de su reloj
 	};
 
 	struct FRoundEvent

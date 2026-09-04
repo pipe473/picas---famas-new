@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "Core/PFRoundTypes.h"
+#include "PFTypes.h"
 #include "PFTuningDataAsset.generated.h"
 
 UCLASS(BlueprintType)
@@ -37,6 +38,10 @@ public:
 	float MatchEndSeconds = 15.f;
 
 	// ---------- Ronda ----------
+	// Simultaneo (Speed Race) o por turnos (orden de asiento / aleatorio por ronda). Por turnos, el reloj solo corre para quien tiene el turno.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ronda")
+	EPFTurnMode TurnMode = EPFTurnMode::Simultaneous;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ronda", meta = (ClampMin = 3.0))
 	float AttemptSeconds = 10.f;
 

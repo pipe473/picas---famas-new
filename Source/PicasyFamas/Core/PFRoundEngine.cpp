@@ -45,12 +45,17 @@ namespace PF
 		{
 			S.DisconnectTime = Now;
 			S.AttemptDeadline = 0.0;           // el reloj se para: desconectar no acumula Pasos
+			if (IsTurnBased() && Player == CurrentTurn) AdvanceTurn(Now);
 		}
 		else
 		{
 			S.bDropped = false;
 			S.DisconnectTime = 0.0;
-			if (bRoundActive && !S.bInactive) ResetAttemptClock(Player, Now);
+			if (bRoundActive && !S.bInactive)
+			{
+				if (!IsTurnBased()) ResetAttemptClock(Player, Now);
+				else if (CurrentTurn == kNoPlayer) AdvanceTurn(Now);   // nadie podia jugar: retoma la rotacion
+			}
 		}
 		EmitSimple(EEventType::PlayerStatsChanged, Player, Now);
 	}
@@ -64,7 +69,11 @@ namespace PF
 		{
 			S.bInactive = false;
 			EmitSimple(EEventType::PlayerActive, Player, Now);
-			if (bRoundActive && S.bConnected) ResetAttemptClock(Player, Now);
+			if (bRoundActive && S.bConnected)
+			{
+				if (!IsTurnBased()) ResetAttemptClock(Player, Now);
+				else if (CurrentTurn == kNoPlayer) AdvanceTurn(Now);
+			}
 			EmitSimple(EEventType::PlayerStatsChanged, Player, Now);
 		}
 	}
@@ -131,14 +140,85 @@ namespace PF
 			S.RoundScore = 0;
 			S.LastAttemptTime = -1.0e9;
 			S.BestAttemptTime = 0.0;
-			S.AttemptDeadline = S.bConnected ? Now + Config.AttemptSeconds : 0.0;
+			// Simultaneo: todos los relojes arrancan ya. Por turnos: solo el de quien tenga el turno (AdvanceTurn).
+			S.AttemptDeadline = (!IsTurnBased() && S.bConnected) ? Now + Config.AttemptSeconds : 0.0;
 		}
+
+		TurnCount = 0; TurnCursor = -1; CurrentTurn = kNoPlayer; TurnNumber = 0;
+		if (IsTurnBased()) BuildTurnOrder(Rng);   // misma semilla que el codigo: orden reproducible
 
 		FRoundEvent Ev; Ev.Type = EEventType::RoundStarted; Ev.Time = Now; Ev.Value = Config.CodeLength;
 		Emit(Ev);
 		for (int32_t i = 0; i < kMaxPlayers; ++i)
 		{
 			if (Players[i].bPresent) EmitSimple(EEventType::PlayerStatsChanged, static_cast<uint8_t>(i), Now);
+		}
+		if (IsTurnBased()) AdvanceTurn(Now);
+	}
+
+	// ------------------------------------------------------------------------------------------------
+	// Modo por turnos
+	// ------------------------------------------------------------------------------------------------
+
+	void FRoundEngine::BuildTurnOrder(FRng& Rng)
+	{
+		TurnCount = 0;
+		for (int32_t i = 0; i < kMaxPlayers; ++i)
+		{
+			if (Players[i].bPresent) TurnOrder[TurnCount++] = static_cast<uint8_t>(i);
+		}
+		if (Config.TurnMode == ETurnMode::RandomOrder)
+		{
+			// Fisher-Yates con el RNG determinista de la ronda.
+			for (int32_t i = TurnCount - 1; i > 0; --i)
+			{
+				const int32_t j = static_cast<int32_t>(Rng.Next64() % static_cast<uint64_t>(i + 1));
+				const uint8_t Tmp = TurnOrder[i]; TurnOrder[i] = TurnOrder[j]; TurnOrder[j] = Tmp;
+			}
+		}
+	}
+
+	bool FRoundEngine::CanTakeTurn(uint8_t Player) const
+	{
+		const FPlayerSlot& S = Players[Player];
+		return S.bPresent && S.bConnected && !S.bInactive && !S.bDropped;
+	}
+
+	void FRoundEngine::AdvanceTurn(double Now)
+	{
+		if (!bRoundActive || !IsTurnBased()) return;
+
+		const uint8_t Prev = CurrentTurn;
+		if (Prev != kNoPlayer) Players[Prev].AttemptDeadline = 0.0;   // su reloj se para
+		CurrentTurn = kNoPlayer;
+
+		// Siguiente elegible en el orden circular (desconectados, inactivos y caidos se saltan).
+		for (int32_t k = 0; k < TurnCount; ++k)
+		{
+			TurnCursor = (TurnCursor + 1) % TurnCount;
+			const uint8_t Cand = TurnOrder[TurnCursor];
+			if (CanTakeTurn(Cand)) { CurrentTurn = Cand; break; }
+		}
+		++TurnNumber;
+
+		if (CurrentTurn != kNoPlayer) ResetAttemptClock(CurrentTurn, Now);
+
+		FRoundEvent Ev; Ev.Type = EEventType::TurnChanged; Ev.Player = CurrentTurn; Ev.Value = TurnNumber;
+		Ev.Time = CurrentTurn != kNoPlayer ? Players[CurrentTurn].AttemptDeadline : Now;
+		Emit(Ev);
+		if (Prev != kNoPlayer && Prev != CurrentTurn) EmitSimple(EEventType::PlayerStatsChanged, Prev, Now);
+		if (CurrentTurn != kNoPlayer) EmitSimple(EEventType::PlayerStatsChanged, CurrentTurn, Now);
+	}
+
+	void FRoundEngine::OnAttemptConsumed(uint8_t Player, double Now)
+	{
+		if (IsTurnBased())
+		{
+			if (Player == CurrentTurn) AdvanceTurn(Now);
+		}
+		else
+		{
+			ResetAttemptClock(Player, Now);
 		}
 	}
 
@@ -155,10 +235,13 @@ namespace PF
 		else if (!ValidPlayer(Player))                       Reject = ERejectReason::UnknownPlayer;
 		else if (!Players[Player].bConnected)                Reject = ERejectReason::PlayerDisconnected;
 		else if (!IsValidCode(Guess, Config.CodeLength))     Reject = ERejectReason::InvalidGuess;
+		else if (IsTurnBased() && Player != CurrentTurn)     Reject = ERejectReason::NotYourTurn;
 		else if (PendingCount >= kMaxPending)                Reject = ERejectReason::HistoryFull;
 
 		if (Reject != ERejectReason::None)
 		{
+			// Intentar jugar fuera de turno sigue siendo actividad: un Inactivo vuelve a entrar en la rotacion.
+			if (Reject == ERejectReason::NotYourTurn && Players[Player].bInactive) NotePlayerAction(Player, ReceiveTime);
 			EmitSimple(EEventType::GuessRejected, Player, ReceiveTime, -1, static_cast<int32_t>(Reject));
 			return false;
 		}
@@ -248,6 +331,13 @@ namespace PF
 			S.bInactive = false;
 			S.ConsecutivePasses = 0;
 			EmitSimple(EEventType::PlayerActive, P.Player, Now);
+		}
+
+		// Por turnos: el turno pudo cambiar entre el encolado y la resolucion (p. ej. dos envios en el mismo tick).
+		if (IsTurnBased() && P.Player != CurrentTurn)
+		{
+			EmitSimple(EEventType::GuessRejected, P.Player, Now, -1, static_cast<int32_t>(ERejectReason::NotYourTurn));
+			return;
 		}
 
 		// Reloj de intento con margen de jitter. Si expiro, es un Paso, no un intento.
@@ -421,7 +511,7 @@ namespace PF
 			StartSuddenDeath(P.Player, Now);
 		}
 
-		ResetAttemptClock(P.Player, Now);
+		OnAttemptConsumed(P.Player, Now);
 		EmitSimple(EEventType::PlayerStatsChanged, P.Player, Now);
 	}
 
@@ -550,10 +640,11 @@ namespace PF
 				S.AttemptDeadline = 0.0;   // relojes parados: no acumula mas Pasos
 				EmitSimple(EEventType::PlayerInactive, Player, Now);
 				EmitSimple(EEventType::PlayerStatsChanged, Player, Now);
+				if (IsTurnBased() && Player == CurrentTurn) AdvanceTurn(Now);   // el turno no se queda colgado
 				return;
 			}
 		}
-		ResetAttemptClock(Player, Now);
+		OnAttemptConsumed(Player, Now);
 		EmitSimple(EEventType::PlayerStatsChanged, Player, Now);
 	}
 

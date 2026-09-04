@@ -65,6 +65,26 @@ Tres decisiones de diseño lo mantienen honesto con la esencia lógica del origi
 
 Una partida son **3 rondas**; gana la suma. El diseño hace viable ganar una partida *sin acertar ningún código* si aportas la mayoría de la información — y viable ganar acertando siempre a costa del trabajo ajeno. Ambos perfiles son legítimos y se odian mutuamente, que es lo que queremos en una sala.
 
+#### 1.2.1 Variante «Por turnos» (opcional, misma ronda)
+
+Para mesas que prefieren un ritmo de sobremesa, la sala puede activar el **modo por turnos** (`ETurnMode`):
+
+| Modo | Orden | Cronómetro |
+|---|---|---|
+| `Simultaneous` (por defecto) | Nadie espera: todos envían a la vez | Un reloj por jugador, se reinicia con cada intento |
+| `SeatOrder` | Rotación fija por asiento | **Solo corre para quien tiene el turno**; arranca al recibirlo |
+| `RandomOrder` | Se baraja al empezar **cada ronda** (Fisher-Yates con la semilla de la ronda: reproducible en replay) | Igual que arriba |
+
+Reglas del turno:
+
+- Solo el jugador con el turno puede enviar; el resto recibe `NotYourTurn` (la UI bloquea el teclado y muestra "Turno de X").
+- El turno se consume con un **intento** o con un **Paso** (reloj expirado, −5). En ambos casos pasa al siguiente y su reloj arranca en ese instante.
+- Desconectados, Inactivos (2 Pasos seguidos) y caídos **se saltan** en la rotación; si nadie puede jugar, la ronda espera al cap. Un Inactivo que intenta jugar fuera de turno vuelve a entrar en la rotación en la siguiente vuelta.
+- Sospechar y leer el tablero se permiten en cualquier momento: la deducción no se detiene aunque no sea tu turno.
+- La Muerte Sudada sigue igual (20 s globales) y acorta el reloj del turno a 6 s: con 4 jugadores hay 2–3 turnos para cerrar, lo que en simulación hace que expire en un 4–7 % de las rondas (en Speed Race casi nunca).
+
+El servidor emite `TurnChanged(Player, TurnNumber, Deadline)`; `APFGameState` replica `TurnMode`, `TurnPlayerIndex`, `TurnNumber` y `TurnOrder`, y el reloj del turno viaja en el `AttemptDeadlineServerTime` del `PlayerState` correspondiente.
+
 ### 1.3 Faroleo y Ocultación
 
 Cada jugador dispone por ronda de **1 ficha de Encriptar** y **1 ficha de Señuelo** (en Equipos, las fichas son del equipo, ver §1.4). No se recargan: gastarlas pronto es perder una herramienta para la Muerte Sudada.

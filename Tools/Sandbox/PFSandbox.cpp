@@ -3,7 +3,10 @@
 //
 //   pf_sandbox play [bots] [--seed N]                 partida interactiva en tiempo real (tu + bots)
 //   pf_sandbox sim  [partidas] [jugadores] [--seed N] simulacion acelerada con estadisticas
-//   opciones:  --human         bots con latencia de lectura (3 s) y tiempos de pensar x2.5
+//   opciones:  --turns seat|random|simultaneous   modo por turnos (el reloj corre solo para quien tiene el turno)
+//              --pace fast|normal|slow            realismo de los bots (por defecto slow en serve)
+//              --attempt N                        segundos por intento (por defecto 10)
+//              --human         bots con latencia de lectura (3 s) y tiempos de pensar x2.5
 //              --decoy-cap N   tope de rivales que puntuan por un senuelo (0 = sin tope, GDD v0.2)
 //              --quiet         sin progreso en sim
 //
@@ -74,7 +77,30 @@ enum class EProfile { Human, Sondeador, Cerrador, Farolero, Paciente };
 // --human: tardan en LEER cada entrada nueva del tablero y piensan mas despacio.
 static double gReadLatency = 0.0;   // s que una entrada publica tarda en ser incorporada por el bot
 static double gThinkScale  = 1.0;   // multiplicador de los tiempos de pensar
+static double gSloppiness  = 0.0;   // prob. de que el bot NO procese una pista ajena hasta pasados 12 s (humanos no leen todo)
+static int    gMemory      = 0;     // cuantas pistas AJENAS recientes retiene el bot (0 = todas). Una persona maneja 3-5.
+static double gAttemptSeconds = 0;  // reloj por intento (0 = el del motor, 10 s). Palanca de diseno del ritmo.
+static ETurnMode gTurnMode = ETurnMode::Simultaneous;   // simultaneo | por turnos (asiento) | por turnos (aleatorio)
+
+static ETurnMode ParseTurnMode(const std::string& S)
+{
+	if (S == "seat" || S == "order")  return ETurnMode::SeatOrder;
+	if (S == "random" || S == "rand") return ETurnMode::RandomOrder;
+	return ETurnMode::Simultaneous;
+}
+static const char* TurnModeName(ETurnMode M)
+{
+	return M == ETurnMode::SeatOrder ? "seat" : (M == ETurnMode::RandomOrder ? "random" : "simultaneous");
+}
 static int    gDecoyCap    = 0;     // tope de rivales que puntuan por senuelo (0 = sin tope)
+
+// Ritmo de la partida (afecta solo a los bots; las reglas del motor no cambian salvo el reloj si se pide).
+static void SetPace(const std::string& Pace)
+{
+	if (Pace == "fast")        { gReadLatency = 0.0; gThinkScale = 1.0; gSloppiness = 0.0;  gMemory = 0; }   // deductores perfectos
+	else if (Pace == "normal") { gReadLatency = 3.0; gThinkScale = 2.5; gSloppiness = 0.30; gMemory = 6; }
+	else                       { gReadLatency = 5.0; gThinkScale = 4.0; gSloppiness = 0.55; gMemory = 3; }   // "slow": ritmo de mesa
+}
 
 static const char* ProfileName(EProfile P)
 {
@@ -99,6 +125,7 @@ struct FBot
 	int      SeenRevision = -1;
 	double   NextThinkTime = 0.0;
 	double   LastRebuildTime = -1.0;
+	bool     bTurnArmed = false;
 	bool     bDecoyUsed = false, bEncryptUsed = false;
 	int      Contradictions = 0;
 
@@ -120,10 +147,22 @@ struct FBot
 		auto Build = [&](bool bOnlyTrusted)
 		{
 			View.Reset(Len);
+			// Memoria limitada: solo las ultimas gMemory pistas ajenas "caben en la cabeza".
+			int FirstRemembered = 0;
+			if (gMemory > 0)
+			{
+				int Count = 0;
+				for (int i = E.NumEntries() - 1; i >= 0; --i)
+				{
+					if (E.EntryAt(i).Player == Seat) continue;
+					if (++Count > gMemory) { FirstRemembered = i + 1; break; }
+				}
+			}
 			for (int i = 0; i < E.NumEntries(); ++i)
 			{
 				const FPublicEntry P = MakePublic(E.EntryAt(i), true);
 				if (P.Flags & GuessFlags::ResultHidden) continue;
+				if (P.Player != Seat && i < FirstRemembered) continue;
 				if (P.Player == Seat)
 				{
 					auto It = MyTruth.find(P.Seq);
@@ -134,6 +173,9 @@ struct FBot
 				const bool bAged = Age >= 8.0 || (P.Flags & GuessFlags::DecoyRevealed);
 				if ((bOnlyTrusted || Profile == EProfile::Paciente) && !bAged) continue;
 				if (Age < gReadLatency) continue;   // aun no lo ha leido
+				// Despiste humano: algunas pistas ajenas se le escapan durante un rato (decision estable por entrada).
+				const uint32_t H = (uint32_t(P.Seq) * 2654435761u) ^ (uint32_t(Seat) * 40503u + 7u);
+				if (Age < 12.0 && double(H % 1000) < gSloppiness * 1000.0) continue;
 				View.Filter(P.Guess, FGuessResult{ P.Famas, P.Picas });
 			}
 		};
@@ -157,9 +199,16 @@ struct FBot
 		{
 			RebuildView(E, Now, Len); SeenRevision = BoardRevision; LastRebuildTime = Now;
 		}
-		if (Now < NextThinkTime) return A;
+		// Por turnos: mientras no sea mi turno solo observo. Al recibirlo, "empiezo a pensar" desde ese momento.
+		if (E.IsTurnBased())
+		{
+			if (E.GetCurrentTurnPlayer() != Seat) { bTurnArmed = false; return A; }
+			if (!bTurnArmed) { bTurnArmed = true; NextThinkTime = Now + Uniform(1.0, 3.0) * gThinkScale * 0.6; }
+		}
 
 		const double TimeLeft = S.AttemptDeadline > 0 ? S.AttemptDeadline - Now : 1e9;
+		// Como una persona: si el reloj se acaba, envia lo mejor que tenga aunque no haya terminado de pensar.
+		if (Now < NextThinkTime && TimeLeft > 1.2) return A;
 		const bool bAlert = E.GetAlertPlayer() != kNoPlayer;
 		const int N = View.Num;
 		auto Pick = [&]() { return View.Codes[RandInt(0, View.Num - 1)]; };
@@ -248,7 +297,9 @@ struct FTable : public IRoundListener
 	bool bVerbose = true;
 
 	int BoardRevision = 0;
-	std::vector<std::string> Log;
+	struct FLogItem { int Id; std::string Text; };
+	std::vector<FLogItem> Log;
+	int LogSeq = 0;
 	std::map<int32_t, FGuessResult> HumanTruth;
 	FRoundStats Round;
 	double RoundStart = 0;
@@ -274,7 +325,8 @@ struct FTable : public IRoundListener
 	{
 		Config.CodeLength = NumPlayers >= 6 ? 5 : 4;
 		Config.Scoring.DecoyEffectiveMaxTargets = gDecoyCap;
-		Engine.StartRound(Config, Seed, Now);
+		if (gAttemptSeconds > 0) Config.AttemptSeconds = gAttemptSeconds;
+		Config.TurnMode = gTurnMode;
 		Round = FRoundStats{};
 		RoundStart = Now;
 		KeyClueTime = -1;
@@ -283,9 +335,10 @@ struct FTable : public IRoundListener
 		LastPrivate.clear();
 		BoardRevision++;
 		for (auto& B : Bots) B->ResetForRound(Now, Config.CodeLength);
+		Engine.StartRound(Config, Seed, Now);   // por turnos: emite el primer TurnChanged
 	}
 
-	void Push(const std::string& S) { Log.push_back(S); if (Log.size() > 8) Log.erase(Log.begin()); }
+	void Push(const std::string& S) { Log.push_back({ ++LogSeq, S }); if (Log.size() > 8) Log.erase(Log.begin()); }
 
 	void OnRoundEvent(const FRoundEvent& E) override
 	{
@@ -309,8 +362,8 @@ struct FTable : public IRoundListener
 		case EEventType::GuessRejected:
 			if ((int)E.Player == HumanSeat)
 			{
-				static const char* R[] = { "", "ronda no activa", "jugador desconocido", "desconectado", "intento invalido", "demasiado rapido", "reloj expirado (Paso)", "ronda terminada", "historial lleno" };
-				Push("Intento rechazado: " + std::string(R[E.Value]));
+				static const char* R[] = { "", "ronda no activa", "jugador desconocido", "desconectado", "intento invalido", "demasiado rapido", "reloj expirado (Paso)", "ronda terminada", "historial lleno", "no es tu turno" };
+				Push("Intento rechazado: " + std::string(E.Value >= 0 && E.Value < 10 ? R[E.Value] : "?"));
 			}
 			break;
 		case EEventType::Pass:            Round.Passes++; break;
@@ -339,6 +392,10 @@ struct FTable : public IRoundListener
 			break;
 		}
 		case EEventType::Intuition:       Round.bIntuition = true; Push(Who + ": golpe de intuicion (habia varios candidatos)"); break;
+		case EEventType::TurnChanged:
+			if (E.Player != kNoPlayer && Engine.IsRoundActive()) Push("Turno " + std::to_string(E.Value) + ": " + Who);
+			BoardRevision++;
+			break;
 		case EEventType::RoundEnded:
 			Round.Duration = E.Time - RoundStart; Round.Reason = (ERoundEndReason)E.Value;
 			if (E.Player != kNoPlayer && Round.Winner == kNoPlayer) Round.Winner = E.Player;
@@ -423,7 +480,7 @@ static void Render(const FTable& T, double Now, int RoundIndex, int NumRounds, c
 	}
 
 	Out += "\n  EVENTOS\n";
-	for (const auto& L : T.Log) Out += "  - " + L + "\n";
+	for (const auto& L : T.Log) Out += "  - " + L.Text + "\n";
 
 	Out += "\n> 1234 intento | e1234 encriptar | d1234 F P senuelo | s <#> sospechar | q salir\n> ";
 	std::fwrite(Out.data(), 1, Out.size(), stdout);
@@ -613,22 +670,353 @@ static int RunSim(int Matches, int Players, uint64_t Seed, bool bQuiet)
 	return 0;
 }
 
+// ------------------------------------------------------------------------------------------------
+// Modo serve: servidor HTTP local minimo + interfaz web (Tools/Sandbox/web/index.html)
+// ------------------------------------------------------------------------------------------------
+
+static std::string JsonStr(const std::string& S)
+{
+	std::string O = "\"";
+	for (unsigned char c : S)
+	{
+		if (c == '"') O += "\\\""; else if (c == '\\') O += "\\\\"; else if (c < 0x20) O += ' '; else O += char(c);
+	}
+	return O + "\"";
+}
+
+static std::string ReadFile(const std::string& Path)
+{
+	FILE* F = std::fopen(Path.c_str(), "rb");
+	if (!F) return "";
+	std::string S; char Buf[4096]; size_t N;
+	while ((N = std::fread(Buf, 1, sizeof Buf, F)) > 0) S.append(Buf, N);
+	std::fclose(F);
+	return S;
+}
+
+static std::string UrlDecode(const std::string& S)
+{
+	std::string O;
+	for (size_t i = 0; i < S.size(); ++i)
+	{
+		if (S[i] == '%' && i + 2 < S.size()) { O += char(std::strtol(S.substr(i + 1, 2).c_str(), nullptr, 16)); i += 2; }
+		else if (S[i] == '+') O += ' ';
+		else O += S[i];
+	}
+	return O;
+}
+
+static std::map<std::string, std::string> ParseQuery(const std::string& Q)
+{
+	std::map<std::string, std::string> M;
+	std::stringstream SS(Q); std::string KV;
+	while (std::getline(SS, KV, '&'))
+	{
+		const size_t Eq = KV.find('=');
+		if (Eq == std::string::npos) M[UrlDecode(KV)] = ""; else M[UrlDecode(KV.substr(0, Eq))] = UrlDecode(KV.substr(Eq + 1));
+	}
+	return M;
+}
+
+static const char* kFirstNames[] = { "Lucia", "Mateo", "Sofia", "Diego", "Valeria", "Andres", "Camila", "Tomas" };
+
+struct FWebSession
+{
+	enum class EPhase { Lobby, Countdown, Playing, Summary, MatchEnd };
+	std::unique_ptr<FTable> T;
+	EPhase Phase = EPhase::Lobby;
+	int RoundIndex = 0, NumRounds = 3;
+	double PhaseEnd = 0;
+	int MatchScore[kMaxPlayers] = {};
+	std::string WebNames[kMaxPlayers];
+	FRoundStats LastRound;
+	uint64_t Seed = 1;
+	bool bSpectator = false;
+	int Bots = 3;
+	int RoundsPlayed = 0;
+	std::string PaceName = "slow";
+
+	void NewMatch(int InBots, bool bHuman, double Now)
+	{
+		Bots = std::max(2, std::min(7, InBots));
+		bSpectator = !bHuman;
+		T = std::make_unique<FTable>();
+		T->bVerbose = false;
+		Seed = (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count();
+		int Seat = 0;
+		if (bHuman) { T->AddPlayer(EProfile::Human, Seed); WebNames[Seat++] = "Tu"; }
+		for (int i = 0; i < Bots; ++i)
+		{
+			T->AddPlayer(kBotRotation[i % 4], Seed + i + 1);
+			WebNames[Seat] = kFirstNames[Seat % 8]; ++Seat;
+		}
+		for (int i = 0; i < T->NumPlayers; ++i) T->Names[i] = WebNames[i];   // los eventos usan los mismos nombres que la web
+		for (int i = 0; i < kMaxPlayers; ++i) MatchScore[i] = 0;
+		RoundIndex = 0; RoundsPlayed = 0;
+		Phase = EPhase::Lobby;
+		PhaseEnd = bSpectator ? Now + 3.0 : 0;   // en espectador arranca solo
+	}
+
+	void BeginCountdown(double Now) { Phase = EPhase::Countdown; PhaseEnd = Now + 3.0; }
+
+	void Tick(double Now)
+	{
+		if (!T) return;
+		switch (Phase)
+		{
+		case EPhase::Lobby:
+			if (bSpectator && Now >= PhaseEnd) BeginCountdown(Now);
+			break;
+		case EPhase::Countdown:
+			if (Now >= PhaseEnd) { T->StartRound(Seed * 31 + RoundIndex, Now); Phase = EPhase::Playing; }
+			break;
+		case EPhase::Playing:
+			T->TickBots(Now);
+			T->Engine.Tick(Now);
+			if (!T->Engine.IsRoundActive())
+			{
+				LastRound = T->Round; RoundsPlayed++;
+				for (int i = 0; i < T->NumPlayers; ++i) MatchScore[i] += T->Round.RoundScore[i];
+				Phase = EPhase::Summary; PhaseEnd = Now + 12.0;
+			}
+			break;
+		case EPhase::Summary:
+			if (Now >= PhaseEnd)
+			{
+				if (++RoundIndex < NumRounds) BeginCountdown(Now);
+				else { Phase = EPhase::MatchEnd; PhaseEnd = Now + 15.0; }
+			}
+			break;
+		case EPhase::MatchEnd:
+			if (bSpectator && Now >= PhaseEnd) NewMatch(Bots, false, Now);
+			break;
+		}
+	}
+
+	std::string StateJson(double Now) const
+	{
+		std::string J = "{";
+		if (!T) return "{\"phase\":\"none\"}";
+		const FRoundEngine& E = T->Engine;
+		const int Len = T->Config.CodeLength ? T->Config.CodeLength : (T->NumPlayers >= 6 ? 5 : 4);
+		static const char* PhaseNames[] = { "lobby", "countdown", "playing", "summary", "matchend" };
+		const bool bRoundActive = E.IsRoundActive();
+		char Buf[256];
+
+		std::snprintf(Buf, sizeof Buf, "\"phase\":\"%s\",\"round\":%d,\"rounds\":%d,\"len\":%d,\"now\":%.3f,\"phaseEnd\":%.3f,\"roundStart\":%.3f,\"spectator\":%s,\"humanSeat\":%d,",
+			PhaseNames[(int)Phase], RoundIndex + 1, NumRounds, Len, Now, PhaseEnd, T->RoundStart, bSpectator ? "true" : "false", T->HumanSeat);
+		J += Buf;
+		J += "\"pace\":" + JsonStr(PaceName) + ",";
+		J += "\"attemptSeconds\":" + std::to_string(int(gAttemptSeconds > 0 ? gAttemptSeconds : FRoundConfig{}.AttemptSeconds)) + ",";
+		J += "\"sdAttemptSeconds\":" + std::to_string(int(FRoundConfig{}.SuddenDeathAttemptSeconds)) + ",";
+		J += "\"turnMode\":" + JsonStr(TurnModeName(gTurnMode)) + ",";
+		J += "\"turnPlayer\":" + std::to_string(bRoundActive && E.IsTurnBased() && E.GetCurrentTurnPlayer() != kNoPlayer ? (int)E.GetCurrentTurnPlayer() : -1) + ",";
+		J += "\"turnNumber\":" + std::to_string(E.GetTurnNumber()) + ",";
+		J += "\"turnOrder\":[";
+		for (int i = 0; i < E.GetTurnOrderCount(); ++i) J += (i ? "," : "") + std::to_string((int)E.GetTurnOrderAt(i));
+		J += "],";
+
+		const bool bShowSecret = (Phase == EPhase::Summary || Phase == EPhase::MatchEnd) && RoundsPlayed > 0;
+		J += "\"secret\":" + (bShowSecret ? JsonStr(CodeStr(E.GetSecretCode(), Len)) : std::string("null")) + ",";
+		J += "\"winner\":" + std::to_string(bShowSecret ? (int)(int8_t)(LastRound.Winner == kNoPlayer ? -1 : LastRound.Winner) : -1) + ",";
+		std::snprintf(Buf, sizeof Buf, "\"alertPlayer\":%d,\"suddenDeathEnd\":%.3f,", bRoundActive && E.GetAlertPlayer() != kNoPlayer ? E.GetAlertPlayer() : -1, E.GetSuddenDeathEndTime());
+		J += Buf;
+
+		J += "\"players\":[";
+		for (int i = 0; i < T->NumPlayers; ++i)
+		{
+			const FPlayerSlot& S = E.GetPlayer(uint8_t(i));
+			std::snprintf(Buf, sizeof Buf, "%s{\"seat\":%d,\"name\":%s,\"profile\":\"%s\",\"bestF\":%d,\"bestP\":%d,\"attempts\":%d,\"roundScore\":%d,\"matchScore\":%d,\"deadline\":%.3f,\"encrypt\":%s,\"decoy\":%s,\"inactive\":%s,\"solved\":%s}",
+				i ? "," : "", i, JsonStr(WebNames[i]).c_str(), ProfileName(T->Profiles[i]), S.BestFamas, S.BestPicas, S.Attempts, S.RoundScore, MatchScore[i] + (bRoundActive ? S.RoundScore : 0),
+				S.AttemptDeadline, S.bHasEncryptToken ? "true" : "false", S.bHasDecoyToken ? "true" : "false", S.bInactive ? "true" : "false", S.BestFamas >= Len ? "true" : "false");
+			J += Buf;
+		}
+		J += "],\"entries\":[";
+		for (int i = 0; i < E.NumEntries(); ++i)
+		{
+			const FPublicEntry P = MakePublic(E.EntryAt(i), bRoundActive);
+			std::snprintf(Buf, sizeof Buf, "%s{\"seq\":%d,\"player\":%d,\"guess\":%s,\"f\":%d,\"p\":%d,\"hidden\":%s,\"decoyRevealed\":%s,\"suspected\":%s,\"keyClue\":%s,\"solved\":%s,\"bits\":%.1f,\"t\":%.3f,\"reveal\":%.3f}",
+				i ? "," : "", P.Seq, P.Player, JsonStr(CodeStr(P.Guess, Len)).c_str(), P.Famas, P.Picas,
+				(P.Flags & GuessFlags::ResultHidden) ? "true" : "false", (P.Flags & GuessFlags::DecoyRevealed) ? "true" : "false",
+				(P.Flags & GuessFlags::Suspected) ? "true" : "false", (P.Flags & GuessFlags::KeyClue) ? "true" : "false", (P.Flags & GuessFlags::Solved) ? "true" : "false",
+				P.InfoBitsX10 / 10.0, P.ServerTime, P.RevealTime);
+			J += Buf;
+		}
+		J += "],\"private\":[";
+		bool bFirst = true;
+		for (const auto& KV : T->HumanTruth)
+		{
+			const FGuessEntry* G = E.FindEntry(KV.first);
+			if (!G) continue;
+			std::snprintf(Buf, sizeof Buf, "%s{\"seq\":%d,\"guess\":%s,\"f\":%d,\"p\":%d}", bFirst ? "" : ",", KV.first, JsonStr(CodeStr(G->Guess, Len)).c_str(), KV.second.Famas, KV.second.Picas);
+			J += Buf; bFirst = false;
+		}
+		J += "],\"events\":[";
+		for (size_t i = 0; i < T->Log.size(); ++i)
+		{
+			J += (i ? "," : "") + std::string("{\"id\":") + std::to_string(T->Log[i].Id) + ",\"text\":" + JsonStr(T->Log[i].Text) + "}";
+		}
+		J += "]}";
+		return J;
+	}
+
+	std::string HandleApi(const std::string& Path, const std::map<std::string, std::string>& Q, double Now)
+	{
+		if (Path == "/api/state") return StateJson(Now);
+		if (Path == "/api/new")
+		{
+			const int B = Q.count("bots") ? std::atoi(Q.at("bots").c_str()) : 3;
+			const bool bHuman = !Q.count("human") || Q.at("human") != "0";
+			if (Q.count("pace")) { SetPace(Q.at("pace")); PaceName = Q.at("pace"); }
+			if (Q.count("attempt")) { const int A = std::atoi(Q.at("attempt").c_str()); gAttemptSeconds = (A >= 5 && A <= 60) ? A : 0; }
+			if (Q.count("turns")) gTurnMode = ParseTurnMode(Q.at("turns"));
+			NewMatch(B, bHuman, Now);
+			return "{\"ok\":true}";
+		}
+		if (!T) return "{\"ok\":false,\"error\":\"sin partida\"}";
+		if (Path == "/api/start")
+		{
+			if (Phase == EPhase::Lobby) BeginCountdown(Now);
+			else if (Phase == EPhase::MatchEnd) { NewMatch(Bots, !bSpectator, Now); if (!bSpectator) BeginCountdown(Now); }
+			return "{\"ok\":true}";
+		}
+		if (T->HumanSeat < 0) return "{\"ok\":false,\"error\":\"modo espectador\"}";
+		const uint8_t Seat = uint8_t(T->HumanSeat);
+		if (Path == "/api/suspect")
+		{
+			const int Seq = Q.count("seq") ? std::atoi(Q.at("seq").c_str()) : -1;
+			if (Seq >= 0) { T->Engine.Suspect(Seat, Seq, Now); T->Push("Sospechas de la entrada #" + std::to_string(Seq)); }
+			return "{\"ok\":true}";
+		}
+		if (Path == "/api/guess")
+		{
+			if (Phase != EPhase::Playing) return "{\"ok\":false,\"error\":\"la ronda no esta en juego\"}";
+			const std::string D = Q.count("d") ? Q.at("d") : "";
+			const std::string Mode = Q.count("mode") ? Q.at("mode") : "plain";
+			const int Len = T->Config.CodeLength;
+			if ((int)D.size() != Len) return "{\"ok\":false,\"error\":\"hacen falta " + std::to_string(Len) + " digitos\"}";
+			uint8_t Dg[kMaxCodeLength] = {};
+			for (int i = 0; i < Len; ++i) { if (!std::isdigit((unsigned char)D[i])) return "{\"ok\":false,\"error\":\"solo digitos\"}"; Dg[i] = uint8_t(D[i] - '0'); }
+			const PackedCode G = PackDigits(Dg, Len);
+			if (!IsValidCode(G, Len)) return "{\"ok\":false,\"error\":\"digitos repetidos\"}";
+			uint8_t Flags = 0, DF = 0, DP = 0;
+			if (Mode == "encrypt") Flags = GuessFlags::ResultHidden;
+			if (Mode == "decoy")
+			{
+				Flags = GuessFlags::Decoy;
+				DF = uint8_t(Q.count("f") ? std::atoi(Q.at("f").c_str()) : 0);
+				DP = uint8_t(Q.count("p") ? std::atoi(Q.at("p").c_str()) : 0);
+				if (DF + DP > Len || DF >= Len) return "{\"ok\":false,\"error\":\"resultado falso imposible\"}";
+			}
+			T->Engine.Enqueue(Seat, G, Flags, DF, DP, Now, 0.0);
+			return "{\"ok\":true}";
+		}
+		return "{\"ok\":false,\"error\":\"ruta desconocida\"}";
+	}
+};
+
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+
+static void SendAll(int Fd, const std::string& S)
+{
+	size_t Off = 0;
+	while (Off < S.size()) { const ssize_t N = send(Fd, S.data() + Off, S.size() - Off, 0); if (N <= 0) break; Off += size_t(N); }
+}
+
+static std::string HttpResponse(const std::string& Body, const char* Type, int Code = 200)
+{
+	return "HTTP/1.1 " + std::to_string(Code) + (Code == 200 ? " OK" : " Not Found") + "\r\nContent-Type: " + Type +
+		"\r\nContent-Length: " + std::to_string(Body.size()) + "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n" + Body;
+}
+
+static int RunServe(int Port, int Bots, bool bSpectator, const std::string& WebDir)
+{
+	const std::string Index = ReadFile(WebDir + "/index.html");
+	if (Index.empty()) { std::fprintf(stderr, "No encuentro %s/index.html\n", WebDir.c_str()); return 1; }
+
+	const int L = socket(AF_INET, SOCK_STREAM, 0);
+	int One = 1; setsockopt(L, SOL_SOCKET, SO_REUSEADDR, &One, sizeof One);
+	sockaddr_in Addr{}; Addr.sin_family = AF_INET; Addr.sin_port = htons(uint16_t(Port)); Addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	if (bind(L, (sockaddr*)&Addr, sizeof Addr) != 0) { std::perror("bind"); return 1; }
+	listen(L, 16);
+	fcntl(L, F_SETFL, fcntl(L, F_GETFL) | O_NONBLOCK);
+
+	using ClockT = std::chrono::steady_clock;
+	const auto T0 = ClockT::now();
+	auto NowFn = [&]() { return 1000.0 + std::chrono::duration<double>(ClockT::now() - T0).count(); };
+
+	FWebSession S;
+	S.NewMatch(Bots, !bSpectator, NowFn());
+	std::printf("Picas y Famas sandbox web: http://127.0.0.1:%d/  (%s)\n", Port, bSpectator ? "espectador: solo bots" : "tu + bots");
+	std::printf("Ctrl+C para parar.\n");
+
+	for (;;)
+	{
+		const double Now = NowFn();
+		S.Tick(Now);
+
+		for (int k = 0; k < 32; ++k)
+		{
+			const int C = accept(L, nullptr, nullptr);
+			if (C < 0) break;
+			fcntl(C, F_SETFL, fcntl(C, F_GETFL) & ~O_NONBLOCK);   // en BSD/macOS el aceptado hereda O_NONBLOCK del listener
+			timeval Tv{ 0, 200000 }; setsockopt(C, SOL_SOCKET, SO_RCVTIMEO, &Tv, sizeof Tv);
+			std::string Req; char Buf[2048];
+			while (Req.find("\r\n\r\n") == std::string::npos && Req.size() < 65536)
+			{
+				const ssize_t N = recv(C, Buf, sizeof Buf, 0);
+				if (N <= 0) break;
+				Req.append(Buf, size_t(N));
+			}
+			std::string Method, Target;
+			{ std::stringstream SS(Req); SS >> Method >> Target; }
+			std::string Path = Target, Query;
+			const size_t Qm = Target.find('?');
+			if (Qm != std::string::npos) { Path = Target.substr(0, Qm); Query = Target.substr(Qm + 1); }
+
+			std::string Resp;
+			if (Path == "/" || Path == "/index.html") Resp = HttpResponse(Index, "text/html; charset=utf-8");
+			else if (Path.rfind("/api/", 0) == 0) Resp = HttpResponse(S.HandleApi(Path, ParseQuery(Query), NowFn()), "application/json; charset=utf-8");
+			else Resp = HttpResponse("not found", "text/plain", 404);
+			SendAll(C, Resp);
+			close(C);
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+}
+
 int main(int Argc, char** Argv)
 {
 	std::string Mode = Argc > 1 ? Argv[1] : "play";
 	uint64_t Seed = (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count();
-	bool bQuiet = false;
+	bool bQuiet = false, bSpectator = false;
+	int Port = 8080;
 	std::vector<int> Nums;
 	for (int i = 2; i < Argc; ++i)
 	{
 		if (!std::strcmp(Argv[i], "--seed") && i + 1 < Argc) { Seed = std::strtoull(Argv[++i], nullptr, 10); continue; }
 		if (!std::strcmp(Argv[i], "--quiet")) { bQuiet = true; continue; }
-		if (!std::strcmp(Argv[i], "--human")) { gReadLatency = 3.0; gThinkScale = 2.5; continue; }
+		if (!std::strcmp(Argv[i], "--spectator")) { bSpectator = true; continue; }
+		if (!std::strcmp(Argv[i], "--port") && i + 1 < Argc) { Port = std::atoi(Argv[++i]); continue; }
+		if (!std::strcmp(Argv[i], "--human")) { SetPace("normal"); continue; }
+		if (!std::strcmp(Argv[i], "--pace") && i + 1 < Argc) { SetPace(Argv[++i]); continue; }
+		if (!std::strcmp(Argv[i], "--attempt") && i + 1 < Argc) { gAttemptSeconds = std::atof(Argv[++i]); continue; }
+		if (!std::strcmp(Argv[i], "--turns") && i + 1 < Argc) { gTurnMode = ParseTurnMode(Argv[++i]); continue; }
 		if (!std::strcmp(Argv[i], "--decoy-cap") && i + 1 < Argc) { gDecoyCap = std::atoi(Argv[++i]); continue; }
 		Nums.push_back(std::atoi(Argv[i]));
 	}
 	if (Mode == "play") return RunPlay(Nums.size() > 0 ? std::max(2, std::min(7, Nums[0])) : 3, Seed);
 	if (Mode == "sim")  return RunSim(Nums.size() > 0 ? Nums[0] : 200, Nums.size() > 1 ? Nums[1] : 5, Seed, bQuiet);
-	std::printf("uso: pf_sandbox play [bots] [--seed N] | sim [partidas] [jugadores] [--seed N] [--quiet]\n");
+	if (Mode == "serve")
+	{
+		if (gReadLatency == 0.0) SetPace("slow");   // en la web, por defecto ritmo de mesa (se puede cambiar en la sala)
+		std::string Dir = Argv[0]; const size_t Slash = Dir.find_last_of('/');
+		Dir = Slash == std::string::npos ? "." : Dir.substr(0, Slash);
+		return RunServe(Port, Nums.size() > 0 ? Nums[0] : 3, bSpectator, Dir + "/web");
+	}
+	std::printf("uso: pf_sandbox play [bots] [--seed N] | sim [partidas] [jugadores] [--seed N] [--quiet] | serve [bots] [--port P] [--spectator]\n");
 	return 1;
 }

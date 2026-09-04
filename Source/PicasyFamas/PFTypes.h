@@ -53,8 +53,18 @@ enum class EPFRejectReason : uint8
 	DeadlineExpired,
 	RoundOver,
 	HistoryFull,
+	NotYourTurn,
 };
-static_assert(static_cast<uint8>(EPFRejectReason::HistoryFull) == static_cast<uint8>(PF::ERejectReason::HistoryFull), "enum desincronizado");
+static_assert(static_cast<uint8>(EPFRejectReason::NotYourTurn) == static_cast<uint8>(PF::ERejectReason::NotYourTurn), "enum desincronizado");
+
+UENUM(BlueprintType)
+enum class EPFTurnMode : uint8
+{
+	Simultaneous = 0 UMETA(DisplayName = "Simultaneo (Speed Race)"),
+	SeatOrder        UMETA(DisplayName = "Por turnos, orden de asiento"),
+	RandomOrder      UMETA(DisplayName = "Por turnos, orden aleatorio"),
+};
+static_assert(static_cast<uint8>(EPFTurnMode::RandomOrder) == static_cast<uint8>(PF::ETurnMode::RandomOrder), "enum desincronizado");
 
 UENUM(BlueprintType)
 enum class EPFScoreReason : uint8

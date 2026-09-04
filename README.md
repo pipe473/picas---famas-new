@@ -32,10 +32,12 @@ Tools/Sandbox/             entorno local sin Unreal: el motor de ronda real con 
 ./Tools/Sandbox/build.sh                       # requiere clang++ (Xcode CLT) o g++
 ./Tools/Sandbox/pf_sandbox play 3              # tú contra 3 bots, en tiempo real
 ./Tools/Sandbox/pf_sandbox sim 200 5 --human   # 200 partidas con 5 bots humanizados + estadísticas de balance
+./Tools/Sandbox/pf_sandbox serve 3 --port 8080 # interfaz web en http://127.0.0.1:8080 (sala, ritmo, reloj, turnos)
 ```
 
 Comandos en partida: `1234` intento · `e1234` encriptar · `d1234 2 1` señuelo (finge 2F 1P) · `s 12` sospechar de #12 · `q` salir.
-Opciones: `--seed N`, `--human` (bots con latencia de lectura y tiempos de pensar realistas), `--decoy-cap N`.
+Opciones: `--seed N`, `--pace slow|normal|fast`, `--attempt N` (segundos por intento), `--turns simultaneous|seat|random`
+(por turnos, el cronómetro corre solo para quien tiene el turno; `random` baraja el orden en cada ronda), `--decoy-cap N`.
 
 ## Requisitos
 

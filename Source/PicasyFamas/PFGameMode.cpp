@@ -165,7 +165,10 @@ void APFGameMode::StartRound(double Now)
 
 	// Semilla por ronda: con ella la partida es reproducible en un replay del servidor.
 	const uint64 Seed = FPlatformTime::Cycles64() ^ (static_cast<uint64>(FMath::Rand()) << 32) ^ static_cast<uint64>(FMath::Rand());
-	Engine->StartRound(Config, Seed, Now);
+	GS->TurnMode = static_cast<EPFTurnMode>(Config.TurnMode);
+	GS->TurnOrder.Reset();
+	Engine->StartRound(Config, Seed, Now);   // emite TurnChanged si es por turnos
+	for (int32 i = 0; i < Engine->GetTurnOrderCount(); ++i) GS->TurnOrder.Add(Engine->GetTurnOrderAt(i));
 
 	GS->ServerSetPhase(EPFRoundPhase::Playing, 0.f);
 
@@ -493,8 +496,13 @@ void APFGameMode::OnRoundEvent(const PF::FRoundEvent& E)
 	case EEventType::RoundStarted:
 		break;
 
+	case EEventType::TurnChanged:
+		GS->ServerSetTurn(E.Player, E.Value);   // el reloj del turno viaja en el PlayerState (PlayerStatsChanged)
+		break;
+
 	case EEventType::RoundEnded:
 	{
+		GS->ServerSetTurn(255, Engine->GetTurnNumber());
 		GS->RevealedCode = static_cast<int32>(E.Guess);
 		GS->LastRoundEndReason = static_cast<EPFRoundEndReason>(E.Value);
 		GS->LastRoundWinnerMask = Engine->GetWinnerMask();

@@ -56,6 +56,7 @@ struct TStructOpsTypeTraits<FPFGuessHistory> : public TStructOpsTypeTraitsBase2<
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FPFOnGuessEntryEvent, int32, Seq);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FPFOnPhaseChanged, EPFRoundPhase, NewPhase);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FPFOnAlert, uint8, PlayerIndex);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FPFOnTurnChanged, uint8, PlayerIndex);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FPFOnHistoryReset);
 
 UCLASS()
@@ -103,6 +104,21 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_Alert, BlueprintReadOnly, Category = "PicasyFamas")
 	uint8 AlertPlayerIndex = 255;
 
+	// Modo por turnos. TurnPlayerIndex = 255 en modo simultaneo o si nadie puede jugar. El reloj del turno
+	// es el AttemptDeadlineServerTime del PlayerState de ese jugador.
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "PicasyFamas")
+	EPFTurnMode TurnMode = EPFTurnMode::Simultaneous;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Turn, BlueprintReadOnly, Category = "PicasyFamas")
+	uint8 TurnPlayerIndex = 255;
+
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "PicasyFamas")
+	int32 TurnNumber = 0;
+
+	// Orden de turnos de la ronda (asientos). Vacio en modo simultaneo.
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "PicasyFamas")
+	TArray<uint8> TurnOrder;
+
 	// Codigo revelado al terminar la ronda. -1 mientras la ronda esta activa.
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "PicasyFamas")
 	int32 RevealedCode = -1;
@@ -119,6 +135,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "PicasyFamas|Eventos") FPFOnGuessEntryEvent OnGuessEntryChanged;
 	UPROPERTY(BlueprintAssignable, Category = "PicasyFamas|Eventos") FPFOnPhaseChanged    OnPhaseChanged;
 	UPROPERTY(BlueprintAssignable, Category = "PicasyFamas|Eventos") FPFOnAlert           OnAlertChanged;
+	UPROPERTY(BlueprintAssignable, Category = "PicasyFamas|Eventos") FPFOnTurnChanged     OnTurnChanged;
 	UPROPERTY(BlueprintAssignable, Category = "PicasyFamas|Eventos") FPFOnHistoryReset    OnHistoryReset;
 
 	// ---------- Consultas (cliente y servidor) ----------
@@ -141,10 +158,12 @@ public:
 	void ServerMarkEntryDirty(FPFGuessEntry& Entry);
 	void ServerSetPhase(EPFRoundPhase NewPhase, float PhaseEnd);
 	void ServerSetAlert(uint8 PlayerIndex, float SuddenDeathEnd);
+	void ServerSetTurn(uint8 PlayerIndex, int32 InTurnNumber);
 
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UFUNCTION() void OnRep_Phase();
 	UFUNCTION() void OnRep_Alert();
+	UFUNCTION() void OnRep_Turn();
 };
