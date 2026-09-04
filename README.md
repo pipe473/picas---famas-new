@@ -35,6 +35,15 @@ Tools/Sandbox/             entorno local sin Unreal: el motor de ronda real con 
 ./Tools/Sandbox/pf_sandbox serve 3 --port 8080 # interfaz web en http://127.0.0.1:8080 (sala, ritmo, reloj, turnos)
 ```
 
+El HUD web es una app **Next.js** (`Tools/Sandbox/web-app`) exportada a HTML/JS estático. `build.sh` la compila y el binario C++ la sirve junto a `/api/*`. Para iterar el UI sin recompilar C++:
+
+```
+./Tools/Sandbox/pf_sandbox serve 3 --port 8080
+cd Tools/Sandbox/web-app && npm install && npm run dev   # http://127.0.0.1:3000 → API en :8080
+```
+
+Requiere Node 20+ para el frontend. El modo `play` / `sim` de consola no lo necesita.
+
 Comandos en partida: `1234` intento · `e1234` encriptar · `d1234 2 1` señuelo (finge 2F 1P) · `s 12` sospechar de #12 · `q` salir.
 Opciones: `--seed N`, `--pace slow|normal|fast`, `--attempt N` (segundos por intento), `--turns simultaneous|seat|random`
 (por turnos, el cronómetro corre solo para quien tiene el turno; `random` baraja el orden en cada ronda), `--decoy-cap N`.

@@ -671,7 +671,7 @@ static int RunSim(int Matches, int Players, uint64_t Seed, bool bQuiet)
 }
 
 // ------------------------------------------------------------------------------------------------
-// Modo serve: servidor HTTP local minimo + interfaz web (Tools/Sandbox/web/index.html)
+// Modo serve: servidor HTTP local minimo + interfaz web (export Next.js en Tools/Sandbox/web)
 // ------------------------------------------------------------------------------------------------
 
 static std::string JsonStr(const std::string& S)
@@ -926,16 +926,49 @@ static void SendAll(int Fd, const std::string& S)
 	while (Off < S.size()) { const ssize_t N = send(Fd, S.data() + Off, S.size() - Off, 0); if (N <= 0) break; Off += size_t(N); }
 }
 
-static std::string HttpResponse(const std::string& Body, const char* Type, int Code = 200)
+static bool EndsWith(const std::string& S, const char* Ext)
+{
+	const size_t N = std::strlen(Ext);
+	return S.size() >= N && std::strcmp(S.c_str() + (S.size() - N), Ext) == 0;
+}
+
+static const char* MimeFor(const std::string& Path)
+{
+	if (EndsWith(Path, ".html"))  return "text/html; charset=utf-8";
+	if (EndsWith(Path, ".js"))    return "application/javascript; charset=utf-8";
+	if (EndsWith(Path, ".css"))   return "text/css; charset=utf-8";
+	if (EndsWith(Path, ".json") || EndsWith(Path, ".map")) return "application/json; charset=utf-8";
+	if (EndsWith(Path, ".txt"))   return "text/plain; charset=utf-8";
+	if (EndsWith(Path, ".svg"))   return "image/svg+xml";
+	if (EndsWith(Path, ".ico"))   return "image/x-icon";
+	if (EndsWith(Path, ".png"))   return "image/png";
+	if (EndsWith(Path, ".woff2")) return "font/woff2";
+	return "application/octet-stream";
+}
+
+static std::string HttpResponse(const std::string& Body, const char* Type, int Code = 200, bool bImmutable = false)
 {
 	return "HTTP/1.1 " + std::to_string(Code) + (Code == 200 ? " OK" : " Not Found") + "\r\nContent-Type: " + Type +
-		"\r\nContent-Length: " + std::to_string(Body.size()) + "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n" + Body;
+		"\r\nContent-Length: " + std::to_string(Body.size()) +
+		"\r\nCache-Control: " + (bImmutable ? "public, max-age=31536000, immutable" : "no-store") +
+		"\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n" + Body;
+}
+
+static std::string ServeStatic(const std::string& WebDir, std::string Path)
+{
+	if (Path.empty() || Path == "/") Path = "/index.html";
+	if (Path.find("..") != std::string::npos || Path[0] != '/') return "";
+	return ReadFile(WebDir + Path);
 }
 
 static int RunServe(int Port, int Bots, bool bSpectator, const std::string& WebDir)
 {
-	const std::string Index = ReadFile(WebDir + "/index.html");
-	if (Index.empty()) { std::fprintf(stderr, "No encuentro %s/index.html\n", WebDir.c_str()); return 1; }
+	if (ReadFile(WebDir + "/index.html").empty())
+	{
+		std::fprintf(stderr, "No encuentro %s/index.html\n", WebDir.c_str());
+		std::fprintf(stderr, "Compila el frontend: (cd Tools/Sandbox/web-app && npm install && npm run build)\n");
+		return 1;
+	}
 
 	const int L = socket(AF_INET, SOCK_STREAM, 0);
 	int One = 1; setsockopt(L, SOL_SOCKET, SO_REUSEADDR, &One, sizeof One);
@@ -978,9 +1011,13 @@ static int RunServe(int Port, int Bots, bool bSpectator, const std::string& WebD
 			if (Qm != std::string::npos) { Path = Target.substr(0, Qm); Query = Target.substr(Qm + 1); }
 
 			std::string Resp;
-			if (Path == "/" || Path == "/index.html") Resp = HttpResponse(Index, "text/html; charset=utf-8");
-			else if (Path.rfind("/api/", 0) == 0) Resp = HttpResponse(S.HandleApi(Path, ParseQuery(Query), NowFn()), "application/json; charset=utf-8");
-			else Resp = HttpResponse("not found", "text/plain", 404);
+			if (Path.rfind("/api/", 0) == 0) Resp = HttpResponse(S.HandleApi(Path, ParseQuery(Query), NowFn()), "application/json; charset=utf-8");
+			else
+			{
+				const std::string Body = ServeStatic(WebDir, Path);
+				if (Body.empty()) Resp = HttpResponse("not found", "text/plain", 404);
+				else Resp = HttpResponse(Body, MimeFor(Path == "/" ? std::string("/index.html") : Path), 200, Path.rfind("/_next/", 0) == 0);
+			}
 			SendAll(C, Resp);
 			close(C);
 		}

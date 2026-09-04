@@ -28,3 +28,8 @@ Plugins/*/Intermediate/
 # Temporales de tests locales
 /tmp/
 pf_sandbox
+
+# Frontend Next.js del sandbox
+Tools/Sandbox/web-app/node_modules/
+Tools/Sandbox/web-app/.next/
+Tools/Sandbox/web-app/out/
