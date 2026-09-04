@@ -294,6 +294,19 @@ struct FPFGuessEntry : public FFastArraySerializerItem
     void PostReplicatedAdd(const struct FPFGuessHistory& Owner);
     void PostReplicatedChange(const struct FPFGuessHistory& Owner);
 };
+```
+
+> **Regla de "vista pública" (aprendida en el sandbox).** Un señuelo debe ser indistinguible de un intento
+> honesto hasta que se revela; de lo contrario, un cliente modificado (o simplemente atento) lo detecta.
+> Lo que el servidor replica pasa siempre por `PF::MakePublic`, que garantiza:
+> - el bit `Decoy` **nunca** se replica (solo `DecoyRevealed`, ya con la verdad);
+> - `RevealServerTime` solo se replica para *Encriptar* (la cuenta atrás de un señuelo es secreta);
+> - `InfoBitsX10` de un señuelo activo son los bits que *aparenta* su resultado falso, y el jugador
+>   cobra provisionalmente esos puntos (se corrige la diferencia al revelar) para que el marcador no delate;
+> - `KeyClue` no se replica mientras la ronda está activa (el cronómetro del Relámpago es invisible);
+>   se publica al cerrar la ronda para el resumen.
+
+```cpp
 
 USTRUCT()
 struct FPFGuessHistory : public FFastArraySerializer

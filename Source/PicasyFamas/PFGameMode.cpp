@@ -550,15 +550,17 @@ void APFGameMode::SyncAllSeats()
 
 void APFGameMode::FillPublicEntry(const PF::FGuessEntry& In, FPFGuessEntry& Out) const
 {
-	// Nunca se copian TrueFamas/TruePicas: lo que no debe verse no se replica.
-	Out.Seq              = In.Seq;
-	Out.PlayerIndex      = In.Player;
-	Out.TeamIndex        = In.Team;
-	Out.PackedGuess      = static_cast<int32>(In.Guess);   // modo Equipos (futuro): kMaskedCode para el rival
-	Out.Famas            = In.Famas;
-	Out.Picas            = In.Picas;
-	Out.Flags            = In.Flags;
-	Out.InfoBitsX10      = In.InfoBitsX10;
-	Out.ServerTime       = static_cast<float>(In.ServerTime);
-	Out.RevealServerTime = static_cast<float>(In.RevealTime);
+	// La vista publica la define el nucleo (PF::MakePublic): sin TrueFamas/TruePicas, sin el bit Decoy,
+	// sin KeyClue mientras la ronda esta activa y sin la cuenta atras de un senuelo.
+	const PF::FPublicEntry P = PF::MakePublic(In, Engine->IsRoundActive(), /*bMaskDigits*/ false);   // Equipos (futuro): enmascarar al rival
+	Out.Seq              = P.Seq;
+	Out.PlayerIndex      = P.Player;
+	Out.TeamIndex        = P.Team;
+	Out.PackedGuess      = static_cast<int32>(P.Guess);
+	Out.Famas            = P.Famas;
+	Out.Picas            = P.Picas;
+	Out.Flags            = P.Flags;
+	Out.InfoBitsX10      = P.InfoBitsX10;
+	Out.ServerTime       = static_cast<float>(P.ServerTime);
+	Out.RevealServerTime = static_cast<float>(P.RevealTime);
 }

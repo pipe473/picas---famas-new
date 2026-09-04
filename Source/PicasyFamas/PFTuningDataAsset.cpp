@@ -27,6 +27,7 @@ PF::FRoundConfig UPFTuningDataAsset::ToRoundConfig(int32 NumPlayers, bool bTeamM
 	S.PointsPerBit       = PointsPerBit;
 	S.KeyClue            = KeyCluePoints;
 	S.DecoyEffective     = DecoyEffectivePoints;
+	S.DecoyEffectiveMaxTargets = DecoyEffectiveMaxTargets;
 	S.DecoyCaught        = DecoyCaughtPoints;
 	S.SuspicionHit       = SuspicionHitPoints;
 	S.SuspicionMiss      = SuspicionMissPoints;

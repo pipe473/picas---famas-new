@@ -331,6 +331,16 @@ namespace PF
 		{
 			E.Famas = P.DecoyFamas; E.Picas = P.DecoyPicas;
 			E.RevealTime = Now + Config.DecoySeconds;
+
+			// Un senuelo debe parecer un intento normal: publica los bits que APARENTA (segun el resultado falso)
+			// y acredita provisionalmente esos puntos. Al revelar se corrige la diferencia. Sin esto, un intento
+			// con 0 bits y sin puntos delataria el farol al instante.
+			Scratch = Candidates;
+			const float FakeBits = Scratch.Filter(P.Guess, FGuessResult{ P.DecoyFamas, P.DecoyPicas });
+			const int32_t FakeBitsX10 = RoundToInt(FakeBits * 10.f);
+			E.InfoBitsX10 = static_cast<uint8_t>(FakeBitsX10 > 255 ? 255 : FakeBitsX10);
+			E.ProvisionalInfoScore = RoundToInt(FakeBits * static_cast<float>(Config.Scoring.PointsPerBit));
+			if (E.ProvisionalInfoScore != 0) AddScore(P.Player, EScoreReason::InfoBits, E.ProvisionalInfoScore, Now);
 		}
 		else
 		{
@@ -422,9 +432,13 @@ namespace PF
 		const int32_t BitsX10 = RoundToInt(Bits * 10.f);
 		E.InfoBitsX10 = static_cast<uint8_t>(BitsX10 > 255 ? 255 : BitsX10);
 
-		if (Bits > 0.f)
+		// Puntos por informacion, descontando lo ya acreditado provisionalmente si fue un senuelo.
+		const int32_t RealScore = RoundToInt(Bits * static_cast<float>(Config.Scoring.PointsPerBit));
+		const int32_t Delta = RealScore - E.ProvisionalInfoScore;
+		E.ProvisionalInfoScore = 0;
+		if (Delta != 0)
 		{
-			AddScore(E.Player, EScoreReason::InfoBits, RoundToInt(Bits * static_cast<float>(Config.Scoring.PointsPerBit)), TimeForKeyClue);
+			AddScore(E.Player, EScoreReason::InfoBits, Delta, TimeForKeyClue);
 		}
 
 		if (Candidates.Num == 1 && KeyClueTime < 0.0)
@@ -463,6 +477,10 @@ namespace PF
 				// Tratamos el intento del rival como codigo hipotetico y miramos que habria puntuado el nuestro contra el.
 				const FGuessResult Hyp = Evaluate(X.Guess, E.Guess, Config.CodeLength);
 				if (Hyp == Fake && Hyp != Truth) ++Misled;
+			}
+			if (Config.Scoring.DecoyEffectiveMaxTargets > 0 && Misled > Config.Scoring.DecoyEffectiveMaxTargets)
+			{
+				Misled = Config.Scoring.DecoyEffectiveMaxTargets;
 			}
 			if (Misled > 0)
 			{
@@ -612,6 +630,11 @@ namespace PF
 		for (int32_t i = 0; i < EntryCount; ++i)
 		{
 			if (Entries[i].RevealTime > 0.0) RevealEntry(Entries[i], Now, false);
+		}
+		// Con la ronda cerrada, la Pista Clave deja de ser secreta (el resumen la muestra).
+		for (int32_t i = 0; i < EntryCount; ++i)
+		{
+			if (Entries[i].Flags & GuessFlags::KeyClue) EmitSimple(EEventType::EntryUpdated, Entries[i].Player, Now, Entries[i].Seq);
 		}
 
 		uint8_t Winner = kNoPlayer;

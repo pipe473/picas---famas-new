@@ -20,7 +20,22 @@ Source/PicasyFamas/
   PFTuningDataAsset.*      todas las palancas de balanceo
   PFTypes.*                enums Blueprint y utilidades de (des)empaquetado
   Tests/PFCoreTests.cpp    Automation Tests
+Tools/Sandbox/             entorno local sin Unreal: el motor de ronda real con bots, jugable en consola
 ```
+
+## Probar sin Unreal (sandbox local)
+
+`Tools/Sandbox` ejecuta el mismo `PFRoundEngine` que usará el servidor, con bots de cuatro perfiles
+(Cerrador, Sondeador, Farolero, Paciente) que deducen sobre la vista pública del tablero.
+
+```
+./Tools/Sandbox/build.sh                       # requiere clang++ (Xcode CLT) o g++
+./Tools/Sandbox/pf_sandbox play 3              # tú contra 3 bots, en tiempo real
+./Tools/Sandbox/pf_sandbox sim 200 5 --human   # 200 partidas con 5 bots humanizados + estadísticas de balance
+```
+
+Comandos en partida: `1234` intento · `e1234` encriptar · `d1234 2 1` señuelo (finge 2F 1P) · `s 12` sospechar de #12 · `q` salir.
+Opciones: `--seed N`, `--human` (bots con latencia de lectura y tiempos de pensar realistas), `--decoy-cap N`.
 
 ## Requisitos
 

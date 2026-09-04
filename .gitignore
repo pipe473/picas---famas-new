@@ -27,3 +27,4 @@ Plugins/*/Intermediate/
 
 # Temporales de tests locales
 /tmp/
+pf_sandbox

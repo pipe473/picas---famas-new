@@ -76,6 +76,7 @@ namespace PF
 		int32_t PointsPerBit       = 10;
 		int32_t KeyClue            = 30;
 		int32_t DecoyEffective     = 15;   // por rival enganado
+		int32_t DecoyEffectiveMaxTargets = 0;   // tope de rivales que puntuan por senuelo (0 = sin tope)
 		int32_t DecoyCaught        = -30;
 		int32_t SuspicionHit       = 15;
 		int32_t SuspicionMiss      = -10;
@@ -134,10 +135,54 @@ namespace PF
 		uint8_t    TrueFamas      = 0;       // verdad, solo servidor
 		uint8_t    TruePicas      = 0;
 		uint8_t    Flags          = GuessFlags::None;
-		uint8_t    InfoBitsX10    = 0;
+		uint8_t    InfoBitsX10    = 0;       // para un senuelo activo: bits que "aparenta" (calculados con el resultado falso)
 		double     ServerTime     = 0.0;
 		double     RevealTime     = 0.0;     // > 0 mientras hay una revelacion pendiente
+		int32_t    ProvisionalInfoScore = 0; // solo servidor: puntos de bits ya acreditados a un senuelo (se corrigen al revelar)
 	};
+
+	// ---- Vista publica: lo UNICO que puede salir del servidor hacia los clientes ----
+	// Mientras la ronda esta activa, ni el bit Decoy ni el bit KeyClue son publicos: el primero delataria
+	// el farol y el segundo revelaria que el codigo ya esta determinado (el cronometro del combo es invisible).
+	inline uint8_t PublicFlags(uint8_t Flags, bool bRoundActive)
+	{
+		uint8_t F = static_cast<uint8_t>(Flags & ~GuessFlags::Decoy);
+		if (bRoundActive) F = static_cast<uint8_t>(F & ~GuessFlags::KeyClue);
+		return F;
+	}
+
+	// Solo un Encriptar muestra su cuenta atras. La revelacion pendiente de un senuelo es secreta.
+	inline double PublicRevealTime(const FGuessEntry& E)
+	{
+		return (E.Flags & GuessFlags::ResultHidden) ? E.RevealTime : 0.0;
+	}
+
+	struct FPublicEntry
+	{
+		int32_t    Seq         = 0;
+		uint8_t    Player      = kNoPlayer;
+		uint8_t    Team        = kNoTeam;
+		PackedCode Guess       = 0;
+		uint8_t    Famas       = 0;
+		uint8_t    Picas       = 0;
+		uint8_t    Flags       = GuessFlags::None;
+		uint8_t    InfoBitsX10 = 0;
+		double     ServerTime  = 0.0;
+		double     RevealTime  = 0.0;
+	};
+
+	inline FPublicEntry MakePublic(const FGuessEntry& E, bool bRoundActive, bool bMaskDigits = false)
+	{
+		FPublicEntry P;
+		P.Seq = E.Seq; P.Player = E.Player; P.Team = E.Team;
+		P.Guess = bMaskDigits ? kMaskedCode : E.Guess;
+		P.Famas = E.Famas; P.Picas = E.Picas;
+		P.Flags = PublicFlags(E.Flags, bRoundActive);
+		P.InfoBitsX10 = E.InfoBitsX10;
+		P.ServerTime = E.ServerTime;
+		P.RevealTime = PublicRevealTime(E);
+		return P;
+	}
 
 	struct FPendingGuess
 	{

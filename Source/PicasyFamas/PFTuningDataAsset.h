@@ -84,6 +84,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Puntuacion") int32 PointsPerBit = 10;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Puntuacion") int32 KeyCluePoints = 30;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Puntuacion") int32 DecoyEffectivePoints = 15;
+	// Maximo de rivales que puntuan por un mismo senuelo (0 = sin tope). En salas grandes evita que farolear domine.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Puntuacion", meta = (ClampMin = 0, ClampMax = 8)) int32 DecoyEffectiveMaxTargets = 2;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Puntuacion") int32 DecoyCaughtPoints = -30;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Puntuacion") int32 SuspicionHitPoints = 15;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Puntuacion") int32 SuspicionMissPoints = -10;

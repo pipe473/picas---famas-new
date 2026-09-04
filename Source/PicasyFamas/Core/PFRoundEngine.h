@@ -102,6 +102,7 @@ namespace PF
 		int32_t         PendingCount = 0;
 
 		FCandidateSet   Candidates;
+		FCandidateSet   Scratch;       // copia de trabajo para calcular los bits "aparentes" de un senuelo
 		PackedCode      SecretCode = 0;
 		uint16_t        SecretMask = 0;
 
