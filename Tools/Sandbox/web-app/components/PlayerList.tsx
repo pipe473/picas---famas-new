@@ -55,7 +55,8 @@ const PlayerCard = memo(function PlayerCard({
   if (isTurn) {
     badge = (
       <>
-        <span className="badge green">{p.seat === S.humanSeat ? "TU TURNO" : "SU TURNO"}</span> {badge}
+        <span className="badge green">{p.seat === S.humanSeat ? "TU TURNO" : "SU TURNO"}</span>
+        {badge}
       </>
     );
   }
@@ -63,26 +64,24 @@ const PlayerCard = memo(function PlayerCard({
   return (
     <div className={cls} style={{ ["--c" as string]: COLORS[p.seat] }}>
       <div className="top">
-        <div>
+        <div className="id">
           <span className="name">{p.name}</span>
-          <span className="prof">{p.profile === "Tu" ? "humano" : p.profile}</span>
-          {orderIdx >= 0 ? (
-            <span className="prof" title="orden de turno">
-              · {orderIdx + 1}º
-            </span>
-          ) : null}
+          <span className="prof">
+            {p.profile === "Tu" ? "humano" : p.profile}
+            {orderIdx >= 0 ? <span title="orden de turno"> · {orderIdx + 1}º</span> : null}
+          </span>
         </div>
         <div className="score">
           {p.matchScore} <small>pts</small>
         </div>
       </div>
       <div className="row2">
-        <span>
-          <Dots f={p.bestF} p={p.bestP} len={S.len} />{" "}
-          <span style={{ marginLeft: 6 }}>{p.attempts} int.</span>
+        <span className="stat">
+          <Dots f={p.bestF} p={p.bestP} len={S.len} />
+          <span className="att">{p.attempts} int.</span>
         </span>
-        <span>
-          {badge}{" "}
+        <span className="state">
+          {badge}
           <span className="tokens">
             {p.encrypt ? "🔒" : <s>🔒</s>} {p.decoy ? "🎭" : <s>🎭</s>}
           </span>
