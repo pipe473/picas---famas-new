@@ -1255,10 +1255,14 @@ struct FRoomHub
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+
 static void SendAll(int Fd, const std::string& S)
 {
 	size_t Off = 0;
-	while (Off < S.size()) { const ssize_t N = send(Fd, S.data() + Off, S.size() - Off, 0); if (N <= 0) break; Off += size_t(N); }
+	while (Off < S.size()) { const ssize_t N = send(Fd, S.data() + Off, S.size() - Off, MSG_NOSIGNAL); if (N <= 0) break; Off += size_t(N); }
 }
 
 static bool EndsWith(const std::string& S, const char* Ext)
@@ -1321,7 +1325,7 @@ static bool SendSse(int Fd, const std::string& Json)
 	size_t Off = 0;
 	while (Off < Frame.size())
 	{
-		const ssize_t N = send(Fd, Frame.data() + Off, Frame.size() - Off, 0);
+		const ssize_t N = send(Fd, Frame.data() + Off, Frame.size() - Off, MSG_NOSIGNAL);
 		if (N <= 0) return false;
 		Off += size_t(N);
 	}
@@ -1382,7 +1386,9 @@ static int RunServe(int Port, int DefaultBots, const std::string& WebDir)
 			const int C = accept(L, nullptr, nullptr);
 			if (C < 0) break;
 			fcntl(C, F_SETFL, fcntl(C, F_GETFL) & ~O_NONBLOCK);
+#ifdef SO_NOSIGPIPE
 			int NoPipe = 1; setsockopt(C, SOL_SOCKET, SO_NOSIGPIPE, &NoPipe, sizeof NoPipe);
+#endif
 			timeval Tv{ 0, 200000 }; setsockopt(C, SOL_SOCKET, SO_RCVTIMEO, &Tv, sizeof Tv);
 			std::string Req; char Buf[2048];
 			while (Req.find("\r\n\r\n") == std::string::npos && Req.size() < 65536)
