@@ -417,15 +417,20 @@ header .sound-btn.on { color: var(--text); border-color: var(--fama); }
 .sound-empty { margin-top: 10px; }
 .linkish { border: 0; background: transparent; color: var(--fama); font-weight: 700; cursor: pointer; padding: 0; font-size: inherit; }
 .linkish:hover { text-decoration: underline; }
-.sound-mini {
-  display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; border: 0; background: transparent;
+.sound-mini { display: flex; align-items: center; gap: 4px; }
+.sound-mini-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 0; background: transparent;
   color: var(--text); cursor: pointer; text-align: left; font-size: 13px;
 }
-.sound-mini span { color: var(--green); font-size: 16px; }
-.sound-mini b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sound-mini small { color: var(--muted); }
+.sound-mini-open span { color: var(--green); font-size: 16px; }
+.sound-mini-open b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sound-mini-open small { color: var(--muted); }
+.sound-mini .src-del { border: 0; width: 28px; height: 28px; font-size: 14px; border-radius: 999px; }
+.sound-mini .src-del:hover { color: var(--text); background: var(--surface); }
 .sound-player iframe { display: block; width: 100%; height: 352px; border: 0; border-radius: 12px; background: var(--surface); }
 .sound-dock.mini .sound-player iframe { height: 80px; }
+/* Oculto: el iframe sigue en el DOM (y sonando) pero no ocupa pantalla ni recibe clics. */
+.sound-dock.hidden { visibility: hidden; pointer-events: none; opacity: 0; animation: none; }
 
 /* ---------- Tablet: cabecera compacta, tres columnas más estrechas ---------- */
 @media (max-width: 1300px) {

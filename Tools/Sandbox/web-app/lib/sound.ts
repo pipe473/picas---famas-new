@@ -16,7 +16,9 @@ export type SoundSettings = {
   currentId: string | null;
 };
 
-export type SoundState = SoundSettings & { open: boolean };
+/** open: panel completo · mini: barra con reproductor compacto · hidden: nada visible (la música sigue). */
+export type DockView = "open" | "mini" | "hidden";
+export type SoundState = SoundSettings & { view: DockView };
 
 export const SOUND_KEY = "pf-sound";
 
@@ -43,7 +45,7 @@ const DEFAULTS: SoundSettings = {
   currentId: SUGGESTED_SOURCES[0]?.id ?? null,
 };
 
-const SERVER_STATE: SoundState = { ...DEFAULTS, open: false };
+const SERVER_STATE: SoundState = { ...DEFAULTS, view: "hidden" };
 
 const KINDS = new Set<string>(Object.keys(KIND_LABEL));
 const ID_RE = /^[A-Za-z0-9]{10,40}$/;
@@ -116,22 +118,25 @@ function load(): SoundState {
   if (typeof window === "undefined") return SERVER_STATE;
   try {
     const raw = localStorage.getItem(SOUND_KEY);
-    if (!raw) return { ...DEFAULTS, open: false };
+    if (!raw) return { ...DEFAULTS, view: "hidden" };
     const o = JSON.parse(raw) as Partial<SoundSettings>;
     const sources = Array.isArray(o.sources) ? o.sources.filter(isSource) : DEFAULTS.sources;
     const currentId =
       typeof o.currentId === "string" && sources.some((s) => s.id === o.currentId)
         ? o.currentId
         : (sources[0]?.id ?? null);
+    const music = typeof o.music === "boolean" ? o.music : DEFAULTS.music;
     return {
       sfx: typeof o.sfx === "boolean" ? o.sfx : DEFAULTS.sfx,
-      music: typeof o.music === "boolean" ? o.music : DEFAULTS.music,
+      music,
       sources,
       currentId,
-      open: false,
+      // Al recargar, la música arranca parada (el navegador exige un gesto), así que se muestra la barra
+      // para que el play quede a un toque.
+      view: music && currentId ? "mini" : "hidden",
     };
   } catch {
-    return { ...DEFAULTS, open: false };
+    return { ...DEFAULTS, view: "hidden" };
   }
 }
 
@@ -181,8 +186,20 @@ export const sound = {
   setSfx(sfx: boolean) {
     setSoundState({ sfx });
   },
-  toggleOpen(open?: boolean) {
-    setSoundState({ open: open ?? !getSoundState().open });
+  open() {
+    setSoundState({ view: "open" });
+  },
+  /** Pliega el panel: a barra si hay música que controlar, a nada si no. */
+  close() {
+    const s = getSoundState();
+    setSoundState({ view: s.music && s.currentId ? "mini" : "hidden" });
+  },
+  hide() {
+    setSoundState({ view: "hidden" });
+  },
+  toggle() {
+    if (getSoundState().view === "open") sound.close();
+    else sound.open();
   },
   select(id: string) {
     setSoundState({ currentId: id, music: true });

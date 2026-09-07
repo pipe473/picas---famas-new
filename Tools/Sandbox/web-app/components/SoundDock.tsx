@@ -21,17 +21,18 @@ const MODE_HELP: Record<SoundMode, string> = {
 
 const MODES: SoundMode[] = ["music", "sfx", "silent"];
 
-/** Botón de la cabecera: muestra el modo actual y abre el panel. */
+/** Botón de la cabecera: muestra el modo actual y abre o pliega el panel. */
 export const SoundToggle = memo(function SoundToggle() {
   const s = useSound();
   const mode = soundModeOf(s);
+  const open = s.view === "open";
   return (
     <button
       type="button"
-      className={`menu-btn sound-btn${s.open ? " on" : ""}`}
-      onClick={() => sound.toggleOpen()}
+      className={`menu-btn sound-btn${open ? " on" : ""}`}
+      onClick={() => sound.toggle()}
       aria-label="Ajustes de sonido"
-      aria-expanded={s.open}
+      aria-expanded={open}
       title="Sonido: música de Spotify, solo efectos o silencio"
     >
       <span aria-hidden="true">{mode === "silent" ? "🔇" : "♫"}</span> {MODE_LABEL[mode]}
@@ -152,32 +153,35 @@ function MusicPanel() {
 }
 
 /**
- * Panel flotante de sonido. El iframe de Spotify vive aquí y no se desmonta al plegar el panel,
- * así la música no se corta al cambiar de fase, abrir la sala o volver al menú.
+ * Panel flotante de sonido. El iframe de Spotify vive aquí y no se desmonta al plegar u ocultar
+ * el panel, así la música no se corta al cambiar de fase, abrir la sala o volver al menú.
  */
 export const SoundDock = memo(function SoundDock() {
   const s = useSound();
   const mode = soundModeOf(s);
   const current = s.music ? (s.sources.find((x) => x.id === s.currentId) ?? null) : null;
+  const open = s.view === "open";
 
   useEffect(() => {
-    if (!s.open) return;
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") sound.toggleOpen(false);
+      if (e.key === "Escape") sound.close();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [s.open]);
+  }, [open]);
 
-  if (!s.open && !current) return null;
+  if (!open && !current) return null;
+
+  const view = open ? "open" : s.view === "hidden" ? "hidden" : "mini";
 
   return (
-    <aside className={`sound-dock${s.open ? "" : " mini"}`} aria-label="Sonido">
-      {s.open ? (
+    <aside className={`sound-dock ${view}`} aria-label="Sonido" aria-hidden={view === "hidden"}>
+      {open ? (
         <div className="sound-panel">
           <div className="sound-head">
             <h2>Sonido</h2>
-            <button type="button" className="src-del" onClick={() => sound.toggleOpen(false)} aria-label="Cerrar panel de sonido">
+            <button type="button" className="src-del" onClick={() => sound.close()} aria-label="Cerrar panel de sonido">
               ×
             </button>
           </div>
@@ -198,13 +202,24 @@ export const SoundDock = memo(function SoundDock() {
           <div className="sub sound-help">{MODE_HELP[mode]}</div>
           {mode === "music" ? <MusicPanel /> : null}
         </div>
-      ) : (
-        <button type="button" className="sound-mini" onClick={() => sound.toggleOpen(true)} title="Abrir el panel de sonido">
-          <span aria-hidden="true">♫</span>
-          <b>{current?.label}</b>
-          <small>Spotify</small>
-        </button>
-      )}
+      ) : view === "mini" ? (
+        <div className="sound-mini">
+          <button type="button" className="sound-mini-open" onClick={() => sound.open()} title="Abrir el panel de sonido">
+            <span aria-hidden="true">♫</span>
+            <b>{current?.label}</b>
+            <small>Spotify</small>
+          </button>
+          <button
+            type="button"
+            className="src-del"
+            onClick={() => sound.hide()}
+            aria-label="Ocultar el reproductor (la música sigue)"
+            title="Ocultar: la música sigue; vuelve desde el botón de la cabecera"
+          >
+            ▾
+          </button>
+        </div>
+      ) : null}
       {current ? (
         <div className="sound-player">
           <iframe

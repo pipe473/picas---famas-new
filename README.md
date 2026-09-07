@@ -44,6 +44,12 @@ cd Tools/Sandbox/web-app && npm install && npm run dev   # http://127.0.0.1:3000
 
 Requiere Node 20+ para el frontend. El modo `play` / `sim` de consola no lo necesita.
 
+**Sonido.** El botón `♫` de la cabecera abre el panel de sonido con tres modos: **Música** (un reproductor de
+Spotify flotante; pega el enlace de *Compartir* de cualquier playlist, álbum o canción y queda guardado en el
+navegador), **Efectos** (solo los pitidos del juego) y **Silencio** (modo descanso: ni pitidos ni música). El
+reproductor sigue sonando al plegarlo, ocultarlo o cambiar de fase. No hace falta cuenta de desarrollador ni
+claves: sin sesión en Spotify se oyen 30 s por tema; iniciando sesión desde el propio reproductor, completo.
+
 Comandos en partida: `1234` intento · `e1234` encriptar · `d1234 2 1` señuelo (finge 2F 1P) · `s 12` sospechar de #12 · `q` salir.
 Opciones: `--seed N`, `--pace slow|normal|fast`, `--attempt N` (segundos por intento), `--turns simultaneous|seat|random`
 (por turnos, el cronómetro corre solo para quien tiene el turno; `random` baraja el orden en cada ronda), `--decoy-cap N`.
