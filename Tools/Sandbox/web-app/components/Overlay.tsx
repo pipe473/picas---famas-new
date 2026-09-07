@@ -218,14 +218,16 @@ function Join({ S }: { S: GameState }) {
       ) : (
         <>
           <div className="opts">
-            Bots{" "}
-            <select value={bots} onChange={(e) => setBots(Number(e.target.value))}>
-              {[1, 2, 3, 4, 5, 6, 7].map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
+            <label>
+              Bots
+              <select value={bots} onChange={(e) => setBots(Number(e.target.value))}>
+                {[1, 2, 3, 4, 5, 6, 7].map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
           <button type="button" className="btn" onClick={() => void playSolo()}>
             JUGAR SOLO vs bots
@@ -296,60 +298,69 @@ function Lobby({ S }: { S: GameState }) {
       {S.isHost ? (
         <>
           <div className="opts">
-            Bots{" "}
-            <select
-              value={bots}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setBots(v);
-                void apply({ bots: v });
-              }}
-            >
-              {Array.from({ length: maxBots + 1 }, (_, i) => (
-                <option key={i} value={i}>
-                  {i}
-                </option>
-              ))}
-            </select>
-            Ritmo{" "}
-            <select
-              value={pace}
-              onChange={(e) => {
-                const v = e.target.value as Pace;
-                setPace(v);
-                void apply({ pace: v });
-              }}
-            >
-              <option value="slow">Tranquilo (mesa)</option>
-              <option value="normal">Normal</option>
-              <option value="fast">Frenético (bots perfectos)</option>
-            </select>
-            Reloj{" "}
-            <select
-              value={attempt}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setAttempt(v);
-                void apply({ attempt: v });
-              }}
-            >
-              {[10, 15, 20, 30].map((a) => (
-                <option key={a}>{a}</option>
-              ))}
-            </select>{" "}
-            s/intento Turnos{" "}
-            <select
-              value={turns}
-              onChange={(e) => {
-                const v = e.target.value as TurnMode;
-                setTurns(v);
-                void apply({ turns: v });
-              }}
-            >
-              <option value="simultaneous">Todos a la vez</option>
-              <option value="seat">Por orden de asiento</option>
-              <option value="random">Orden aleatorio</option>
-            </select>
+            <label>
+              Bots
+              <select
+                value={bots}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setBots(v);
+                  void apply({ bots: v });
+                }}
+              >
+                {Array.from({ length: maxBots + 1 }, (_, i) => (
+                  <option key={i} value={i}>
+                    {i}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Ritmo
+              <select
+                value={pace}
+                onChange={(e) => {
+                  const v = e.target.value as Pace;
+                  setPace(v);
+                  void apply({ pace: v });
+                }}
+              >
+                <option value="slow">Tranquilo (mesa)</option>
+                <option value="normal">Normal</option>
+                <option value="fast">Frenético (bots perfectos)</option>
+              </select>
+            </label>
+            <label>
+              Reloj
+              <select
+                value={attempt}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setAttempt(v);
+                  void apply({ attempt: v });
+                }}
+              >
+                {[10, 15, 20, 30].map((a) => (
+                  <option key={a}>{a}</option>
+                ))}
+              </select>
+              s/intento
+            </label>
+            <label>
+              Turnos
+              <select
+                value={turns}
+                onChange={(e) => {
+                  const v = e.target.value as TurnMode;
+                  setTurns(v);
+                  void apply({ turns: v });
+                }}
+              >
+                <option value="simultaneous">Todos a la vez</option>
+                <option value="seat">Por orden de asiento</option>
+                <option value="random">Orden aleatorio</option>
+              </select>
+            </label>
           </div>
           {err ? <div className="sub" style={{ color: "var(--red)", marginTop: 8 }}>{err}</div> : null}
           <button type="button" className="btn" disabled={!canStart} onClick={() => void begin()}>

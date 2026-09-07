@@ -102,20 +102,24 @@ export const PlayerList = memo(function PlayerList({ S }: { S: GameState }) {
   return (
     <section className="panel">
       <h2>Jugadores</h2>
-      <div>
+      <div className="players">
         {S.players.map((p) => (
           <PlayerCard key={p.seat} p={p} S={S} />
         ))}
       </div>
       <div className="legend">
-        <span className="dots">
-          <span className="dot f" />
-        </span>{" "}
-        Fama (dígito y posición){" "}
-        <span className="dots">
-          <span className="dot p" />
-        </span>{" "}
-        Pica (dígito, otra posición)
+        <span className="lg">
+          <span className="dots">
+            <span className="dot f" />
+          </span>
+          Fama (dígito y posición)
+        </span>
+        <span className="lg">
+          <span className="dots">
+            <span className="dot p" />
+          </span>
+          Pica (dígito, otra posición)
+        </span>
       </div>
     </section>
   );
