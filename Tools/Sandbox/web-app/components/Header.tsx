@@ -5,6 +5,7 @@ import { useNow } from "@/lib/clock";
 import { fmt } from "@/lib/format";
 import { abortMatch, goHome, shareUrl } from "@/lib/api";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { SoundToggle } from "@/components/SoundDock";
 import { COLORS, PHASE_LABEL, type GameState } from "@/lib/types";
 
 const PHASE_CLASS: Record<string, string> = {
@@ -242,6 +243,7 @@ export const Header = memo(function Header({ S }: { S: GameState }) {
       </div>
       {S.joined ? <Status S={S} /> : <div className="status" />}
       <div className="actions">
+        <SoundToggle />
         <ThemeToggle />
         {S.joined ? <HeaderMenu S={S} /> : null}
       </div>
