@@ -364,6 +364,69 @@ main.spectator .events { max-height: none; flex: 1; }
 .tst.bad { border-color: var(--red); }
 .tst.gold { border-color: var(--gold); background: var(--solved-tile); color: var(--gold); }
 
+/* ---------- Sonido: botón de cabecera y dock flotante con Spotify ---------- */
+header .sound-btn.on { color: var(--text); border-color: var(--fama); }
+.sound-dock {
+  position: fixed; right: 22px; bottom: 16px; z-index: 30; width: 360px; max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 96px); overflow-y: auto; -webkit-overflow-scrolling: touch;
+  background: linear-gradient(180deg, var(--card-top), var(--card-bot)); border: 1px solid var(--card-border);
+  border-radius: 16px; padding: 12px; box-shadow: 0 20px 60px var(--card-shadow); animation: slidein .25s;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.sound-dock.mini { width: 320px; padding: 8px; gap: 6px; }
+.sound-head { display: flex; align-items: center; justify-content: space-between; }
+.sound-head h2 { margin: 0; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); }
+.sound-modes { display: flex; gap: 6px; margin-top: 10px; }
+.sound-help { margin-top: 8px; line-height: 1.45; }
+.sound-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; max-height: 176px; overflow-y: auto; }
+.src {
+  display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 10px; background: var(--surface2);
+  overflow: hidden;
+}
+.src.on { border-color: var(--green); background: var(--player-turn); }
+.src-pick {
+  flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; padding: 8px 10px; border: 0;
+  background: transparent; color: var(--text); cursor: pointer; text-align: left; font-size: 13px;
+}
+.src-pick b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-pick small { color: var(--muted); white-space: nowrap; margin-left: auto; }
+.src-del {
+  width: 34px; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--muted);
+  font-size: 18px; line-height: 1; cursor: pointer;
+}
+.sound-head .src-del { border: 1px solid var(--line); border-radius: 999px; width: 28px; height: 28px; }
+.src-del:hover { color: var(--red); }
+.sound-add { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.sound-add input {
+  width: 100%; min-width: 0; background: var(--surface); color: var(--text); border: 1px solid var(--line);
+  border-radius: 10px; padding: 9px 11px; font-size: 13px;
+}
+.sound-add-row { display: flex; gap: 6px; }
+.sound-add-btn {
+  flex-shrink: 0; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: transparent;
+  color: var(--text); font-weight: 800; font-size: 12px; letter-spacing: 1px; cursor: pointer;
+}
+.sound-add-btn:hover { border-color: var(--fama); color: var(--fama); }
+.sound-add-btn:disabled { opacity: .35; cursor: not-allowed; }
+.sound-err { color: var(--red); font-size: 12px; line-height: 1.4; }
+.sound-check { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.sound-check input { accent-color: var(--fama); width: 16px; height: 16px; }
+.sound-hint { margin-top: 8px; line-height: 1.45; font-size: 12px; }
+.sound-hint a { color: var(--green); font-weight: 700; text-decoration: none; }
+.sound-hint a:hover { text-decoration: underline; }
+.sound-empty { margin-top: 10px; }
+.linkish { border: 0; background: transparent; color: var(--fama); font-weight: 700; cursor: pointer; padding: 0; font-size: inherit; }
+.linkish:hover { text-decoration: underline; }
+.sound-mini {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; border: 0; background: transparent;
+  color: var(--text); cursor: pointer; text-align: left; font-size: 13px;
+}
+.sound-mini span { color: var(--green); font-size: 16px; }
+.sound-mini b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sound-mini small { color: var(--muted); }
+.sound-player iframe { display: block; width: 100%; height: 352px; border: 0; border-radius: 12px; background: var(--surface); }
+.sound-dock.mini .sound-player iframe { height: 80px; }
+
 /* ---------- Tablet: cabecera compacta, tres columnas más estrechas ---------- */
 @media (max-width: 1300px) {
   header h1 .tag { display: none; }
@@ -386,8 +449,17 @@ main.spectator .events { max-height: none; flex: 1; }
   .timer { font-size: 20px; min-width: 56px; }
   .alert-bar { padding: 8px 10px; font-size: 13px; gap: 10px; text-align: center; flex-wrap: wrap; }
   .alert-bar .sd { font-size: 20px; }
-  .toasts { top: auto; bottom: 16px; width: calc(100% - 24px); }
+  .toasts { top: auto; bottom: 16px; width: calc(100% - 24px); z-index: 31; }
   .tst { font-size: 14px; padding: 9px 14px; text-align: center; }
+
+  /* El dock de sonido ocupa el ancho de la pantalla; el reproductor se queda compacto. */
+  .sound-dock, .sound-dock.mini {
+    right: 8px; left: 8px; bottom: 8px; width: auto; max-width: none; max-height: calc(100dvh - 72px);
+    border-radius: 14px;
+  }
+  .sound-player iframe { height: 152px; }
+  .sound-dock.mini .sound-player iframe { height: 80px; }
+  .sound-list { max-height: 132px; }
 
   main, main.spectator {
     display: flex; flex-direction: column; gap: 10px; padding: 10px; flex: none; min-height: 0;

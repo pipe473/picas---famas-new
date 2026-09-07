@@ -1,6 +1,9 @@
+import { sfxEnabled } from "./sound";
+
 let ctx: AudioContext | null = null;
 
 function beep(freq: number, dur: number, type: OscillatorType = "sine", gain = 0.06) {
+  if (!sfxEnabled()) return;
   try {
     ctx = ctx ?? new AudioContext();
     const o = ctx.createOscillator();

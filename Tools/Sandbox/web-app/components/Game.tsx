@@ -7,6 +7,7 @@ import { Controls } from "@/components/Controls";
 import { Header } from "@/components/Header";
 import { Overlay } from "@/components/Overlay";
 import { PlayerList } from "@/components/PlayerList";
+import { SoundDock } from "@/components/SoundDock";
 import { Toasts } from "@/components/Toasts";
 import { fetchState, getToken, startMatch, streamUrl, suspect } from "@/lib/api";
 import { sfx } from "@/lib/audio";
@@ -133,6 +134,7 @@ export default function Game() {
       </main>
       <Toasts items={toasts} />
       <Overlay S={S} />
+      <SoundDock />
     </>
   );
 }
