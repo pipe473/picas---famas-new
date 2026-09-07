@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import { sfx } from "@/lib/audio";
-import { configRoom, joinRoom, roomCodeFromUrl, setToken, shareUrl, startMatch, startSolo } from "@/lib/api";
+import { configRoom, createRoom, joinRoom, roomCodeFromUrl, setToken, shareUrl, startMatch, startSolo } from "@/lib/api";
 import { useNow } from "@/lib/clock";
 import { COLORS, type GameState, type Pace, type TurnMode } from "@/lib/types";
 
@@ -149,7 +149,10 @@ function Join({ S }: { S: GameState }) {
   const enterFriends = async () => {
     setErr("");
     setToken("");
-    const r = await joinRoom(name.trim() || "Jugador", roomCodeFromUrl() || undefined);
+    const code = roomCodeFromUrl();
+    const r = code
+      ? await joinRoom(name.trim() || "Jugador", code)
+      : await createRoom(name.trim() || "Jugador");
     finish(r);
   };
 

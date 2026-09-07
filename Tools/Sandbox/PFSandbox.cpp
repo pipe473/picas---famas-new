@@ -1228,8 +1228,7 @@ struct FRoomHub
 		LastCookie.clear();
 		if (Q.count("code")) Q["code"] = NormCode(Q["code"]);
 		const bool bHasCode = Q.count("code") && !Q["code"].empty();
-		const bool bFresh = Token.empty() && !bHasCode;
-		if (Path == "/api/solo" || Path == "/api/create" || (Path == "/api/join" && bFresh))
+		if (Path == "/api/solo" || Path == "/api/create" || (Path == "/api/join" && !bHasCode))
 		{
 			FWebSession* R = NewRoom();
 			const std::string P = (Path == "/api/create") ? "/api/join" : Path;
@@ -1241,6 +1240,14 @@ struct FRoomHub
 		if (!R)
 		{
 			if (Path == "/api/state" || Path == "/api/stream") return LandingJson(Now);
+			// Cookie/token de una instancia anterior (Render se duerme): crear sala nueva.
+			if (Path == "/api/join" && !bHasCode)
+			{
+				R = NewRoom();
+				std::string Body = R->HandleApi("/api/join", Q, "", Now);
+				Track(R);
+				return Body;
+			}
 			if (Path == "/api/join") return "{\"ok\":false,\"error\":\"esa sala no existe\"}";
 			return "{\"ok\":false,\"error\":\"crea una sala o entra con el enlace\"}";
 		}

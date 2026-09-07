@@ -13,6 +13,9 @@ export function setToken(token: string) {
   if (typeof window === "undefined") return;
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
+  document.cookie = token
+    ? `pf=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=86400`
+    : "pf=; Path=/; SameSite=Lax; Max-Age=0";
   window.dispatchEvent(new Event("pf-token"));
 }
 
@@ -27,9 +30,9 @@ function withTok(path: string) {
   return `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(t)}`;
 }
 
-export async function api<T = ApiResult>(path: string): Promise<T | null> {
+export async function api<T = ApiResult>(path: string, opts?: { skipToken?: boolean }): Promise<T | null> {
   try {
-    const r = await fetch(`${BASE}${withTok(path)}`);
+    const r = await fetch(`${BASE}${opts?.skipToken ? path : withTok(path)}`);
     return (await r.json()) as T;
   } catch {
     return null;
@@ -44,10 +47,15 @@ export const resetRoom = () => api("/api/reset");
 
 export function startSolo(name: string, bots = 3) {
   const q = new URLSearchParams({ name, bots: String(bots) });
-  return api<JoinResult>(`/api/solo?${q.toString()}`);
+  return api<JoinResult>(`/api/solo?${q.toString()}`, { skipToken: true });
 }
 
 export type JoinResult = ApiResult & { token?: string; code?: string; host?: boolean };
+
+export function createRoom(name: string) {
+  const q = new URLSearchParams({ name });
+  return api<JoinResult>(`/api/create?${q.toString()}`, { skipToken: true });
+}
 
 export function joinRoom(name: string, code?: string) {
   const q = new URLSearchParams({ name });
