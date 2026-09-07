@@ -34,10 +34,13 @@ export const Controls = memo(function Controls({
     }
   }, [S.phase, S.round]);
 
+  const canEncrypt = !!p?.encrypt;
+  const canDecoy = !!p?.decoy;
+
   useEffect(() => {
-    if (mode === "encrypt" && p && !p.encrypt) setMode("plain");
-    if (mode === "decoy" && p && !p.decoy) setMode("plain");
-  }, [mode, p]);
+    if (mode === "encrypt" && !canEncrypt) setMode("plain");
+    if (mode === "decoy" && !canDecoy) setMode("plain");
+  }, [mode, canEncrypt, canDecoy]);
 
   const pushDigit = useCallback(
     (v: string) => {

@@ -54,8 +54,13 @@ export default function Game() {
   );
 
   useEffect(() => {
-    const id = window.setInterval(() => setTok(getToken()), 400);
-    return () => window.clearInterval(id);
+    const sync = () => setTok(getToken());
+    window.addEventListener("pf-token", sync);
+    const id = window.setInterval(sync, 400);
+    return () => {
+      window.removeEventListener("pf-token", sync);
+      window.clearInterval(id);
+    };
   }, []);
 
   useEffect(() => {

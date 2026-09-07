@@ -13,6 +13,7 @@ export function setToken(token: string) {
   if (typeof window === "undefined") return;
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
+  window.dispatchEvent(new Event("pf-token"));
 }
 
 export function roomCodeFromUrl(): string {
