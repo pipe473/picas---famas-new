@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import { sfx } from "@/lib/audio";
-import { configRoom, createRoom, joinRoom, roomCodeFromUrl, setToken, shareUrl, startMatch, startSolo } from "@/lib/api";
+import { abortMatch, configRoom, createRoom, goHome, joinRoom, roomCodeFromUrl, setToken, shareUrl, startMatch, startSolo } from "@/lib/api";
 import { useNow } from "@/lib/clock";
 import { COLORS, type GameState, type Pace, type TurnMode } from "@/lib/types";
 
@@ -25,6 +25,7 @@ const Countdown = memo(function Countdown({ S }: { S: GameState }) {
       <div className="sub">
         Código de {S.len} dígitos · todos a por el mismo enigma
       </div>
+      <BackActions S={S} allowAbort />
     </>
   );
 });
@@ -67,6 +68,7 @@ const Summary = memo(function Summary({ S }: { S: GameState }) {
       <div className="sub" style={{ marginTop: 12 }}>
         Siguiente ronda en {Math.ceil(Math.max(0, S.phaseEnd - n))} s
       </div>
+      <BackActions S={S} allowAbort />
     </>
   );
 });
@@ -107,9 +109,25 @@ const MatchEnd = memo(function MatchEnd({ S, onAgain }: { S: GameState; onAgain:
           Esperando a que el anfitrión abra otra partida…
         </div>
       )}
+      <BackActions S={S} />
     </>
   );
 });
+
+function BackActions({ S, allowAbort }: { S: GameState; allowAbort?: boolean }) {
+  return (
+    <div className="back-row">
+      {allowAbort && S.isHost ? (
+        <button type="button" className="btn ghost" onClick={() => void abortMatch()}>
+          TERMINAR PARTIDA
+        </button>
+      ) : null}
+      <button type="button" className="btn ghost" onClick={() => void goHome()}>
+        VOLVER AL MENÚ
+      </button>
+    </div>
+  );
+}
 
 function CopyLink({ code }: { code: string }) {
   const [ok, setOk] = useState(false);
@@ -339,6 +357,7 @@ function Lobby({ S }: { S: GameState }) {
           </button>
         </>
       ) : null}
+      <BackActions S={S} />
     </>
   );
 }

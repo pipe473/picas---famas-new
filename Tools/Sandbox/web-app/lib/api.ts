@@ -43,7 +43,23 @@ export const fetchState = () => api<GameState>("/api/state");
 export const startMatch = () => api("/api/start");
 export const suspect = (seq: number) => api(`/api/suspect?seq=${seq}`);
 export const leaveRoom = () => api("/api/leave");
+export const abortMatch = () => api("/api/abort");
 export const resetRoom = () => api("/api/reset");
+
+export function clearInviteUrl() {
+  if (typeof window === "undefined") return;
+  const u = new URL(window.location.href);
+  if (!u.searchParams.has("sala")) return;
+  u.searchParams.delete("sala");
+  const q = u.searchParams.toString();
+  window.history.replaceState({}, "", u.pathname + (q ? `?${q}` : "") + u.hash);
+}
+
+export async function goHome() {
+  await leaveRoom();
+  setToken("");
+  clearInviteUrl();
+}
 
 export function startSolo(name: string, bots = 3) {
   const q = new URLSearchParams({ name, bots: String(bots) });

@@ -32,6 +32,7 @@ header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 26px; border-bottom: 1px solid var(--line);
   background: rgba(10, 14, 26, .7); backdrop-filter: blur(6px);
+  position: relative; z-index: 20;
 }
 header h1 { margin: 0; font-size: 20px; letter-spacing: .5px; font-weight: 800; }
 header h1 span { color: var(--fama); }
@@ -40,7 +41,12 @@ header h1 span { color: var(--fama); }
   padding: 6px 12px; border-radius: 999px; background: var(--panel);
   border: 1px solid var(--line); font-size: 13px; color: var(--muted);
 }
-.chip b { color: var(--text); }
+header .menu-btn {
+  padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line);
+  background: transparent; color: var(--muted); font-size: 13px; font-weight: 700;
+  cursor: pointer; letter-spacing: .3px;
+}
+header .menu-btn:hover { color: var(--text); border-color: #8b96b8; }
 .timer { font-variant-numeric: tabular-nums; font-size: 30px; font-weight: 800; min-width: 96px; text-align: center; }
 .alert-bar {
   display: none; align-items: center; justify-content: center; gap: 16px; padding: 10px;
@@ -195,6 +201,8 @@ main.spectator .events { max-height: none; flex: 1; }
   background: transparent; color: var(--text); border: 1px solid var(--line);
   box-shadow: none; font-size: 13px; padding: 10px 16px; margin-top: 12px;
 }
+.card .back-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.card .back-row .btn { margin-top: 14px; }
 .card .namein {
   background: #1a2340; color: var(--text); border: 1px solid var(--line);
   border-radius: 10px; padding: 12px 14px; font-size: 16px; min-width: 220px; text-align: center;

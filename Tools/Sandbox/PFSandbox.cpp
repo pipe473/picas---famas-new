@@ -1083,11 +1083,38 @@ struct FWebSession
 		if (Path == "/api/leave")
 		{
 			if (!You) return "{\"ok\":false,\"error\":\"no estas en la sala\"}";
-			if (Phase != EPhase::Lobby) return "{\"ok\":false,\"error\":\"solo puedes salir en la sala\"}";
+			if (T && You->Seat >= 0 && You->Seat < kMaxPlayers)
+				T->Engine.SetPlayerConnected(uint8_t(You->Seat), false, Now);
 			const bool bWasHost = You->bHost;
-			Clients.erase(Clients.begin() + (You - Clients.data()));
+			for (size_t i = 0; i < Clients.size(); ++i)
+			{
+				if (Clients[i].Token == You->Token)
+				{
+					Clients.erase(Clients.begin() + int(i));
+					break;
+				}
+			}
 			if (bWasHost && !Clients.empty()) Clients[0].bHost = true;
 			ClampBots();
+			if (Clients.empty())
+			{
+				T.reset();
+				Phase = EPhase::Lobby;
+				PhaseEnd = 0;
+			}
+			return "{\"ok\":true}";
+		}
+
+		if (Path == "/api/abort")
+		{
+			if (!You || !You->bHost) return "{\"ok\":false,\"error\":\"solo el anfitrion puede terminar la partida\"}";
+			T.reset();
+			Phase = EPhase::Lobby;
+			PhaseEnd = 0;
+			RoundIndex = 0;
+			RoundsPlayed = 0;
+			for (int i = 0; i < kMaxPlayers; ++i) MatchScore[i] = 0;
+			for (auto& C : Clients) C.Seat = -1;
 			return "{\"ok\":true}";
 		}
 
@@ -1251,7 +1278,18 @@ struct FRoomHub
 			if (Path == "/api/join") return "{\"ok\":false,\"error\":\"esa sala no existe\"}";
 			return "{\"ok\":false,\"error\":\"crea una sala o entra con el enlace\"}";
 		}
+		const std::string Code = R->RoomCode;
 		std::string Body = R->HandleApi(Path, Q, Token, Now);
+		if (Path == "/api/leave")
+		{
+			TokenRoom.erase(Token);
+			auto It = ByCode.find(Code);
+			if (It != ByCode.end() && It->second->Clients.empty())
+			{
+				ByCode.erase(It);
+				return Body;
+			}
+		}
 		Track(R);
 		return Body;
 	}
