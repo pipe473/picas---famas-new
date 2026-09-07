@@ -3,9 +3,10 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { useNow } from "@/lib/clock";
 import { fmt } from "@/lib/format";
-import { abortMatch, goHome, shareUrl } from "@/lib/api";
+import { abortMatch, goHome } from "@/lib/api";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { SoundToggle } from "@/components/SoundDock";
+import { ShareInvite } from "@/components/ShareInvite";
 import { COLORS, PHASE_LABEL, type GameState } from "@/lib/types";
 
 const PHASE_CLASS: Record<string, string> = {
@@ -105,7 +106,6 @@ type Pending = "abort" | "leave" | null;
 function HeaderMenu({ S }: { S: GameState }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<Pending>(null);
-  const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -148,17 +148,6 @@ function HeaderMenu({ S }: { S: GameState }) {
     void (what === "abort" ? abortMatch() : goHome());
   };
 
-  const copy = async () => {
-    const url = shareUrl(S.roomCode);
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      window.prompt("Copia este enlace", url);
-    }
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
-  };
-
   return (
     <div className="menu" ref={ref}>
       <button
@@ -181,9 +170,7 @@ function HeaderMenu({ S }: { S: GameState }) {
                 <span className="lbl">Sala</span>
                 <b className="code">{S.roomCode}</b>
               </div>
-              <button type="button" className="copy" onClick={() => void copy()}>
-                {copied ? "Copiado ✓" : "Copiar enlace"}
-              </button>
+              <ShareInvite code={S.roomCode} compact />
             </div>
           ) : null}
 

@@ -2,8 +2,9 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import { sfx } from "@/lib/audio";
-import { abortMatch, configRoom, createRoom, goHome, joinRoom, roomCodeFromUrl, setToken, shareUrl, startMatch, startSolo } from "@/lib/api";
+import { abortMatch, configRoom, createRoom, goHome, joinRoom, roomCodeFromUrl, setToken, startMatch, startSolo } from "@/lib/api";
 import { useNow } from "@/lib/clock";
+import { ShareInvite } from "@/components/ShareInvite";
 import { COLORS, type GameState, type Pace, type TurnMode } from "@/lib/types";
 
 const Countdown = memo(function Countdown({ S }: { S: GameState }) {
@@ -129,25 +130,6 @@ function BackActions({ S, allowAbort }: { S: GameState; allowAbort?: boolean }) 
   );
 }
 
-function CopyLink({ code }: { code: string }) {
-  const [ok, setOk] = useState(false);
-  const copy = async () => {
-    const url = shareUrl(code);
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      window.prompt("Copia este enlace", url);
-    }
-    setOk(true);
-    window.setTimeout(() => setOk(false), 1600);
-  };
-  return (
-    <button type="button" className="btn ghost" onClick={() => void copy()}>
-      {ok ? "ENLACE COPIADO" : `COPIAR ENLACE · ${code}`}
-    </button>
-  );
-}
-
 function Join({ S }: { S: GameState }) {
   const invited = !!roomCodeFromUrl();
   const busy = S.phase !== "lobby" && S.phase !== "none";
@@ -192,7 +174,7 @@ function Join({ S }: { S: GameState }) {
           ? "Entras a la sala de un amigo. Todos atacáis el mismo código."
           : busy
             ? "Hay una partida en pantalla (a menudo una prueba colgada). Empieza una tuya: solo contra bots, o sala para amigos."
-            : "Solo: tú contra bots. Amigos: creas una sala y compartes el enlace (Madrid, Barcelona, etc.)."}
+            : "Solo: tú contra bots. Amigos: creas una sala y mandas el código por WhatsApp o con el enlace (Madrid, Barcelona, etc.)."}
       </div>
       <div className="opts">
         <input
@@ -280,7 +262,7 @@ function Lobby({ S }: { S: GameState }) {
       <div className="sub">
         Todos descifráis el <b>mismo código</b>.{" "}
         {humans <= 1
-          ? "Estás solo: añade bots y pulsa Jugar solo, o copia el enlace y espera a un amigo."
+          ? "Estás solo: añade bots y pulsa Jugar solo, o invita a un amigo por WhatsApp y espera."
           : S.isHost
             ? "Eres el anfitrión. Cuando estéis listos, empieza."
             : "Esperando a que el anfitrión empiece…"}
@@ -294,7 +276,7 @@ function Lobby({ S }: { S: GameState }) {
           </span>
         ))}
       </div>
-      <CopyLink code={S.roomCode} />
+      <ShareInvite code={S.roomCode} />
       {S.isHost ? (
         <>
           <div className="opts">
