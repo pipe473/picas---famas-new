@@ -436,9 +436,14 @@ main.spectator .events { max-height: none; flex: 1; }
   html, body { height: auto; min-height: 100%; overflow: auto; }
   body { min-height: 100dvh; }
   /* Móvil: marca y acciones en la primera fila; el estado ocupa una segunda fila completa. */
-  header { grid-template-columns: minmax(0, 1fr) auto; padding: 8px 12px; gap: 8px 10px; }
+  header {
+    grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand actions" "status status";
+    padding: 8px 12px; gap: 8px 10px;
+  }
   header h1 { font-size: 17px; }
-  .status { grid-column: 1 / -1; justify-content: flex-start; gap: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .brand { grid-area: brand; }
+  .actions { grid-area: actions; }
+  .status { grid-area: status; justify-content: flex-start; gap: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
   .status:empty { display: none; }
   .timer { min-width: 60px; align-items: flex-start; }
   .timer b { font-size: 22px; }
