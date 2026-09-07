@@ -33,3 +33,4 @@ pf_sandbox
 Tools/Sandbox/web-app/node_modules/
 Tools/Sandbox/web-app/.next/
 Tools/Sandbox/web-app/out/
+Tools/Sandbox/web-app/tsconfig.tsbuildinfo
