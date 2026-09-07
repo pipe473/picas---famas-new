@@ -4,6 +4,7 @@ import { memo } from "react";
 import { useNow } from "@/lib/clock";
 import { fmt } from "@/lib/format";
 import { abortMatch, goHome } from "@/lib/api";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { COLORS, PHASE_LABEL, type GameState } from "@/lib/types";
 
 const TurnChip = memo(function TurnChip({ S }: { S: GameState }) {
@@ -67,6 +68,7 @@ export const Header = memo(function Header({ S }: { S: GameState }) {
           </div>
         ) : null}
         <Timer S={S} />
+        <ThemeToggle />
         {S.joined && S.isHost && S.phase !== "lobby" && S.phase !== "none" && S.phase !== "matchend" ? (
           <button type="button" className="menu-btn" onClick={() => void abortMatch()}>
             Terminar
