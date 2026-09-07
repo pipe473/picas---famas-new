@@ -155,27 +155,84 @@ html, body {
 }
 body { display: flex; flex-direction: column; }
 button, select, input { font-family: inherit; touch-action: manipulation; }
+/* Cabecera: marca | estado de la partida | acciones. Tres zonas con roles distintos. */
 header {
-  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px;
-  padding: 14px 26px; border-bottom: 1px solid var(--line);
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px 20px;
+  padding: 10px 26px; border-bottom: 1px solid var(--line);
   background: var(--header-bg); backdrop-filter: blur(6px);
   position: relative; z-index: 20; flex-shrink: 0;
 }
+.brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 header h1 { margin: 0; font-size: 20px; letter-spacing: .5px; font-weight: 800; white-space: nowrap; }
 header h1 span { color: var(--fama); }
-header h1 .tag { color: var(--muted); font-weight: 500; font-size: 14px; margin-left: 10px; }
-.hud { display: flex; gap: 12px 18px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-.chip {
-  padding: 6px 12px; border-radius: 999px; background: var(--panel);
-  border: 1px solid var(--line); font-size: 13px; color: var(--muted);
+.brand .tag { color: var(--muted); font-weight: 500; font-size: 13px; white-space: nowrap; }
+
+/* Estado: cronómetro con rótulo + dos líneas (fase/ronda arriba, detalles abajo). Solo lectura. */
+.status { display: flex; align-items: center; justify-content: center; gap: 14px; min-width: 0; }
+.timer { display: flex; flex-direction: column; align-items: center; line-height: 1; min-width: 84px; }
+.timer b { font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 800; }
+.timer small { font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); margin-top: 4px; white-space: nowrap; }
+.status-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.status-main { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.status-sub { display: flex; flex-wrap: wrap; gap: 2px 0; font-size: 12px; color: var(--muted); }
+.status-sub > span + span::before { content: "·"; margin: 0 6px; opacity: .6; }
+.status-sub b { color: var(--text); font-weight: 700; }
+.status-sub .turn-me { color: var(--fama); }
+.phase {
+  padding: 3px 9px; border-radius: 6px; font-size: 11px; font-weight: 800; letter-spacing: 1px;
+  text-transform: uppercase; background: var(--badge-grey); color: var(--muted); white-space: nowrap;
 }
-header .menu-btn {
-  padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line);
-  background: transparent; color: var(--muted); font-size: 13px; font-weight: 700;
-  cursor: pointer; letter-spacing: .3px;
+.phase.live { background: var(--green); color: var(--badge-green-fg); }
+.phase.warm { background: var(--fama); color: var(--badge-gold-fg); }
+.phase.cool { background: var(--violet); color: var(--badge-violet-fg); }
+.phase.gold { background: var(--gold); color: var(--badge-gold-fg); }
+
+/* Acciones: botones con forma distinta a los datos (cuadrados, no píldoras). */
+.actions { display: flex; align-items: center; gap: 8px; justify-self: end; }
+.icon-btn {
+  width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel);
+  color: var(--muted); display: grid; place-items: center; cursor: pointer; padding: 0;
 }
-header .menu-btn:hover { color: var(--text); border-color: var(--header-btn-hover); }
-.timer { font-variant-numeric: tabular-nums; font-size: 30px; font-weight: 800; min-width: 96px; text-align: center; }
+.icon-btn:hover { color: var(--text); border-color: var(--header-btn-hover); }
+.icon-btn svg { width: 18px; height: 18px; }
+.menu { position: relative; }
+.menu-btn {
+  height: 36px; padding: 0 14px 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel);
+  color: var(--text); font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+}
+.menu-btn:hover, .menu-btn[aria-expanded="true"] { border-color: var(--header-btn-hover); }
+.menu-btn svg { width: 18px; height: 18px; }
+.menu-pop {
+  position: absolute; right: 0; top: calc(100% + 8px); width: min(300px, calc(100vw - 24px)); padding: 8px;
+  border-radius: 14px; background: linear-gradient(180deg, var(--card-top), var(--card-bot));
+  border: 1px solid var(--card-border); box-shadow: 0 20px 50px var(--card-shadow); animation: slidein .2s; z-index: 30;
+}
+.menu-room { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px 12px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+.menu-room .lbl { display: block; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+.menu-room .code { font-size: 22px; letter-spacing: 3px; font-weight: 900; color: var(--gold); }
+.menu-room .copy {
+  padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.menu-room .copy:hover { border-color: var(--header-btn-hover); }
+.menu-item {
+  width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px;
+  border-radius: 10px; border: 0; background: transparent; color: var(--text); font-size: 14px; font-weight: 700;
+  text-align: left; cursor: pointer;
+}
+.menu-item small { font-size: 12px; font-weight: 500; color: var(--muted); }
+.menu-item:hover { background: var(--surface); }
+.menu-item.danger { color: var(--red); }
+.menu-confirm {
+  display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: 10px;
+  background: var(--entry-decoy); border: 1px solid var(--red); font-size: 13px; line-height: 1.35;
+}
+.menu-confirm .row { display: flex; gap: 8px; }
+.menu-confirm .row button {
+  flex: 1; padding: 8px; border-radius: 8px; font-weight: 800; font-size: 13px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text);
+}
+.menu-confirm .row button.yes { background: var(--red); border-color: var(--red); color: #fff; }
 .alert-bar {
   display: none; align-items: center; justify-content: center; gap: 16px; padding: 10px;
   background: linear-gradient(90deg, #5a0f1a, #b3182b, #5a0f1a);
@@ -365,7 +422,7 @@ main.spectator .events { max-height: none; flex: 1; }
 .tst.gold { border-color: var(--gold); background: var(--solved-tile); color: var(--gold); }
 
 /* ---------- Sonido: botón de cabecera y dock flotante con Spotify ---------- */
-header .sound-btn.on { color: var(--text); border-color: var(--fama); }
+header .sound-btn.on { color: var(--fama); border-color: var(--fama); }
 .sound-dock {
   position: fixed; right: 22px; bottom: 16px; z-index: 30; width: 360px; max-width: calc(100vw - 24px);
   max-height: calc(100vh - 96px); overflow-y: auto; -webkit-overflow-scrolling: touch;
@@ -434,10 +491,10 @@ header .sound-btn.on { color: var(--text); border-color: var(--fama); }
 
 /* ---------- Tablet: cabecera compacta, tres columnas más estrechas ---------- */
 @media (max-width: 1300px) {
-  header h1 .tag { display: none; }
-  header { padding: 12px 18px; }
-  .hud { gap: 8px 10px; }
-  .timer { font-size: 24px; min-width: 72px; }
+  .brand .tag { display: none; }
+  header { padding: 10px 18px; gap: 8px 14px; }
+  .timer { min-width: 72px; }
+  .timer b { font-size: 24px; }
   main { gap: 12px; padding: 12px 16px; }
   main, main.spectator { grid-template-columns: minmax(200px, 250px) minmax(0, 1fr) minmax(240px, 290px); }
 }
@@ -446,12 +503,24 @@ header .sound-btn.on { color: var(--text); border-color: var(--fama); }
 @media (max-width: 960px) {
   html, body { height: auto; min-height: 100%; overflow: auto; }
   body { min-height: 100dvh; }
-  header { padding: 10px 12px; gap: 6px 10px; }
+  /* Móvil: marca y acciones en la primera fila; el estado ocupa una segunda fila completa. */
+  header {
+    grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand actions" "status status";
+    padding: 8px 12px; gap: 8px 10px;
+  }
   header h1 { font-size: 17px; }
-  .hud { gap: 6px; }
-  .chip { padding: 4px 9px; font-size: 12px; }
-  header .menu-btn { padding: 4px 10px; font-size: 12px; }
-  .timer { font-size: 20px; min-width: 56px; }
+  .brand { grid-area: brand; }
+  .actions { grid-area: actions; }
+  .status { grid-area: status; justify-content: flex-start; gap: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .status:empty { display: none; }
+  .timer { min-width: 60px; align-items: flex-start; }
+  .timer b { font-size: 22px; }
+  .timer small { font-size: 9px; letter-spacing: 1px; }
+  .status-main { font-size: 13px; }
+  .status-sub { font-size: 11px; }
+  .icon-btn, .menu-btn { height: 34px; }
+  .icon-btn { width: 34px; }
+  .menu-btn { padding: 0 12px 0 10px; font-size: 12px; }
   .alert-bar { padding: 8px 10px; font-size: 13px; gap: 10px; text-align: center; flex-wrap: wrap; }
   .alert-bar .sd { font-size: 20px; }
   .toasts { top: auto; bottom: 16px; width: calc(100% - 24px); z-index: 31; }
@@ -547,7 +616,7 @@ header .sound-btn.on { color: var(--text); border-color: var(--fama); }
 
 @media (max-width: 400px) {
   header h1 { font-size: 15px; }
-  .chip { font-size: 11px; padding: 3px 8px; }
+  .status { gap: 10px; }
   .keypad { gap: 6px; }
   .display .tile { width: 44px; height: 52px; }
   .modes { gap: 4px; }
