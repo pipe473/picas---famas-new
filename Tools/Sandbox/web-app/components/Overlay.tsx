@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import { sfx } from "@/lib/audio";
-import { newMatch, startMatch } from "@/lib/api";
+import { configRoom, joinRoom, roomCodeFromUrl, setToken, shareUrl, startMatch, startSolo } from "@/lib/api";
 import { useNow } from "@/lib/clock";
 import { COLORS, type GameState, type Pace, type TurnMode } from "@/lib/types";
 
@@ -98,90 +98,258 @@ const MatchEnd = memo(function MatchEnd({ S, onAgain }: { S: GameState; onAgain:
           ))}
         </tbody>
       </table>
-      <button type="button" className="btn" onClick={onAgain}>
-        {S.spectator ? "OTRA PARTIDA" : "UNA MÁS"}
-      </button>
+      {S.isHost ? (
+        <button type="button" className="btn" onClick={onAgain}>
+          UNA MÁS
+        </button>
+      ) : (
+        <div className="sub" style={{ marginTop: 16 }}>
+          Esperando a que el anfitrión abra otra partida…
+        </div>
+      )}
     </>
   );
 });
 
-function Lobby({ S }: { S: GameState }) {
-  const [bots, setBots] = useState(Math.max(2, S.players.length - (S.spectator ? 0 : 1)));
-  const [pace, setPace] = useState<Pace>(S.pace || "slow");
-  const [attempt, setAttempt] = useState(S.attemptSeconds || 10);
-  const [turns, setTurns] = useState<TurnMode>(S.turnMode || "simultaneous");
-  const [spec, setSpec] = useState(S.spectator);
+function CopyLink({ code }: { code: string }) {
+  const [ok, setOk] = useState(false);
+  const copy = async () => {
+    const url = shareUrl(code);
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      window.prompt("Copia este enlace", url);
+    }
+    setOk(true);
+    window.setTimeout(() => setOk(false), 1600);
+  };
+  return (
+    <button type="button" className="btn ghost" onClick={() => void copy()}>
+      {ok ? "ENLACE COPIADO" : `COPIAR ENLACE · ${code}`}
+    </button>
+  );
+}
 
-  const begin = async () => {
-    await newMatch({ bots, human: !spec, pace, attempt, turns });
-    await startMatch();
+function Join({ S }: { S: GameState }) {
+  const invited = !!roomCodeFromUrl();
+  const busy = S.phase !== "lobby" && S.phase !== "none";
+  const [name, setName] = useState("");
+  const [bots, setBots] = useState(3);
+  const [err, setErr] = useState("");
+
+  const finish = (r: { ok?: boolean; token?: string; error?: string } | null) => {
+    if (!r?.ok || !r.token) {
+      setErr(r?.error ?? "no se pudo entrar");
+      return false;
+    }
+    setToken(r.token);
+    return true;
   };
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter") void begin();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-    // begin captura el estado actual de los selects.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bots, pace, attempt, turns, spec]);
+  const enterFriends = async () => {
+    setErr("");
+    setToken("");
+    const r = await joinRoom(name.trim() || "Jugador", roomCodeFromUrl() || undefined);
+    finish(r);
+  };
+
+  const playSolo = async () => {
+    setErr("");
+    setToken("");
+    const r = await startSolo(name.trim() || "Jugador", bots);
+    finish(r);
+  };
 
   return (
     <>
-      <h3>Sala lista</h3>
-      <div className="big">{S.players.length} jugadores</div>
+      <h3>{invited ? "Te han invitado" : "Cómo quieres jugar"}</h3>
+      <div className="big" style={{ fontSize: 36 }}>
+        {invited ? S.roomCode : "Picas y Famas"}
+      </div>
       <div className="sub">
-        Todos descifráis el <b>mismo código</b> de {S.len} dígitos distintos. Cada intento es público: las pistas de
-        tus rivales también son tuyas.
-        <br />
-        {attempt} s por intento · con {S.len - 1} Famas se activa la Muerte Sudada.
+        {invited
+          ? "Entras a la sala de un amigo. Todos atacáis el mismo código."
+          : busy
+            ? "Hay una partida en pantalla (a menudo una prueba colgada). Empieza una tuya: solo contra bots, o sala para amigos."
+            : "Solo: tú contra bots. Amigos: creas una sala y compartes el enlace (Madrid, Barcelona, etc.)."}
       </div>
       <div className="opts">
-        Bots{" "}
-        <select value={bots} onChange={(e) => setBots(Number(e.target.value))}>
-          {[2, 3, 4, 5, 6, 7].map((b) => (
-            <option key={b}>{b}</option>
-          ))}
-        </select>
-        Ritmo{" "}
-        <select value={pace} onChange={(e) => setPace(e.target.value as Pace)}>
-          <option value="slow">Tranquilo (mesa)</option>
-          <option value="normal">Normal</option>
-          <option value="fast">Frenético (bots perfectos)</option>
-        </select>
-        Reloj{" "}
-        <select value={attempt} onChange={(e) => setAttempt(Number(e.target.value))}>
-          {[10, 15, 20, 30].map((a) => (
-            <option key={a}>{a}</option>
-          ))}
-        </select>{" "}
-        s/intento Turnos{" "}
-        <select value={turns} onChange={(e) => setTurns(e.target.value as TurnMode)}>
-          <option value="simultaneous">Todos a la vez</option>
-          <option value="seat">Por orden de asiento</option>
-          <option value="random">Orden aleatorio</option>
-        </select>
-        <label>
-          <input type="checkbox" checked={spec} onChange={(e) => setSpec(e.target.checked)} /> solo bots
-        </label>
+        <input
+          className="namein"
+          maxLength={16}
+          placeholder="Tu nombre"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void (invited ? enterFriends() : playSolo());
+          }}
+        />
       </div>
-      <button type="button" className="btn" onClick={() => void begin()}>
-        {spec ? "VER PARTIDA" : "EMPEZAR"}
-      </button>
+      {err ? (
+        <div className="sub" style={{ color: "var(--red)", marginTop: 8 }}>
+          {err}
+        </div>
+      ) : null}
+      {invited ? (
+        <button type="button" className="btn" onClick={() => void enterFriends()}>
+          ENTRAR A LA SALA
+        </button>
+      ) : (
+        <>
+          <div className="opts">
+            Bots{" "}
+            <select value={bots} onChange={(e) => setBots(Number(e.target.value))}>
+              {[1, 2, 3, 4, 5, 6, 7].map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button type="button" className="btn" onClick={() => void playSolo()}>
+            JUGAR SOLO vs bots
+          </button>
+          <button type="button" className="btn ghost" onClick={() => void enterFriends()}>
+            CREAR SALA PARA AMIGOS
+          </button>
+        </>
+      )}
+    </>
+  );
+}
+
+function Lobby({ S }: { S: GameState }) {
+  const humans = S.players.filter((p) => p.profile === "humano").length;
+  const [bots, setBots] = useState(S.bots > 0 ? S.bots : humans <= 1 ? 3 : 0);
+  const [pace, setPace] = useState<Pace>(S.pace || "slow");
+  const [attempt, setAttempt] = useState(S.attemptSeconds || 10);
+  const [turns, setTurns] = useState<TurnMode>(S.turnMode || "simultaneous");
+  const [err, setErr] = useState("");
+  const total = humans + bots;
+  const canStart = total >= (S.minPlayers ?? 2) && total <= (S.maxPlayers ?? 8);
+  const maxBots = Math.max(0, (S.maxPlayers ?? 8) - humans);
+
+  useEffect(() => {
+    if ((S.bots ?? 0) > 0) setBots(S.bots);
+  }, [S.bots]);
+
+  const apply = async (next?: { bots?: number; pace?: Pace; attempt?: number; turns?: TurnMode }) => {
+    const b = next?.bots ?? bots;
+    const p = next?.pace ?? pace;
+    const a = next?.attempt ?? attempt;
+    const t = next?.turns ?? turns;
+    await configRoom({ bots: b, pace: p, attempt: a, turns: t });
+  };
+
+  const begin = async () => {
+    setErr("");
+    await apply();
+    const r = await startMatch();
+    if (r && !r.ok) setErr(r.error ?? "no se pudo empezar");
+  };
+
+  return (
+    <>
+      <h3>Sala {S.roomCode}</h3>
+      <div className="big" style={{ fontSize: 40 }}>
+        {total} / {S.maxPlayers ?? 8}
+      </div>
+      <div className="sub">
+        Todos descifráis el <b>mismo código</b>.{" "}
+        {humans <= 1
+          ? "Estás solo: añade bots y pulsa Jugar solo, o copia el enlace y espera a un amigo."
+          : S.isHost
+            ? "Eres el anfitrión. Cuando estéis listos, empieza."
+            : "Esperando a que el anfitrión empiece…"}
+      </div>
+      <div className="seats">
+        {S.players.map((p) => (
+          <span key={p.seat} className="seat" style={{ borderColor: COLORS[p.seat], color: COLORS[p.seat] }}>
+            {p.name}
+            {p.profile === "humano" && p.seat === S.humanSeat ? " · tú" : ""}
+            {p.profile !== "humano" ? " · bot" : ""}
+          </span>
+        ))}
+      </div>
+      <CopyLink code={S.roomCode} />
+      {S.isHost ? (
+        <>
+          <div className="opts">
+            Bots{" "}
+            <select
+              value={bots}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setBots(v);
+                void apply({ bots: v });
+              }}
+            >
+              {Array.from({ length: maxBots + 1 }, (_, i) => (
+                <option key={i} value={i}>
+                  {i}
+                </option>
+              ))}
+            </select>
+            Ritmo{" "}
+            <select
+              value={pace}
+              onChange={(e) => {
+                const v = e.target.value as Pace;
+                setPace(v);
+                void apply({ pace: v });
+              }}
+            >
+              <option value="slow">Tranquilo (mesa)</option>
+              <option value="normal">Normal</option>
+              <option value="fast">Frenético (bots perfectos)</option>
+            </select>
+            Reloj{" "}
+            <select
+              value={attempt}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setAttempt(v);
+                void apply({ attempt: v });
+              }}
+            >
+              {[10, 15, 20, 30].map((a) => (
+                <option key={a}>{a}</option>
+              ))}
+            </select>{" "}
+            s/intento Turnos{" "}
+            <select
+              value={turns}
+              onChange={(e) => {
+                const v = e.target.value as TurnMode;
+                setTurns(v);
+                void apply({ turns: v });
+              }}
+            >
+              <option value="simultaneous">Todos a la vez</option>
+              <option value="seat">Por orden de asiento</option>
+              <option value="random">Orden aleatorio</option>
+            </select>
+          </div>
+          {err ? <div className="sub" style={{ color: "var(--red)", marginTop: 8 }}>{err}</div> : null}
+          <button type="button" className="btn" disabled={!canStart} onClick={() => void begin()}>
+            {humans <= 1 ? (canStart ? "JUGAR SOLO vs bots" : "Elige al menos 1 bot") : canStart ? "EMPEZAR CON AMIGOS" : "Mínimo 2 jugadores"}
+          </button>
+        </>
+      ) : null}
     </>
   );
 }
 
 export const Overlay = memo(function Overlay({ S }: { S: GameState }) {
-  if (S.phase === "playing") return null;
+  if (S.joined && S.phase === "playing") return null;
   return (
     <div className="overlay on">
       <div className="card">
-        {S.phase === "lobby" ? <Lobby S={S} /> : null}
-        {S.phase === "countdown" ? <Countdown S={S} /> : null}
-        {S.phase === "summary" ? <Summary S={S} /> : null}
-        {S.phase === "matchend" ? (
+        {!S.joined ? <Join S={S} /> : null}
+        {S.joined && S.phase === "lobby" ? <Lobby S={S} /> : null}
+        {S.joined && S.phase === "countdown" ? <Countdown S={S} /> : null}
+        {S.joined && S.phase === "summary" ? <Summary S={S} /> : null}
+        {S.joined && S.phase === "matchend" ? (
           <MatchEnd
             S={S}
             onAgain={async () => {

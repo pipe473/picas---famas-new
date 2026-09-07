@@ -60,6 +60,11 @@ export const Header = memo(function Header({ S }: { S: GameState }) {
         <div className="chip">
           <b>{PHASE_LABEL[S.phase] ?? S.phase}</b>
         </div>
+        {S.roomCode ? (
+          <div className="chip">
+            Sala <b>{S.roomCode}</b>
+          </div>
+        ) : null}
         <Timer S={S} />
       </div>
     </header>

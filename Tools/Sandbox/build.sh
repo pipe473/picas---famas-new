@@ -16,5 +16,6 @@ fi
 echo "ok: $HERE/pf_sandbox"
 echo "  $HERE/pf_sandbox play 3          # tu contra 3 bots"
 echo "  $HERE/pf_sandbox sim 200 5       # 200 partidas con 5 bots"
-echo "  $HERE/pf_sandbox serve 3 --port 8080"
+echo "  $HERE/pf_sandbox serve --port 8080"
+echo "  $HERE/share.sh                   # serve + túnel gratis para amigos"
 echo "  frontend en caliente: (cd Tools/Sandbox/web-app && NEXT_PUBLIC_API_BASE=http://127.0.0.1:8080 npm run dev)"

@@ -16,6 +16,7 @@
 //                         s 12        sospechar de la entrada #12
 //                         q           salir
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -31,6 +32,7 @@
 #include <vector>
 
 #include <poll.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include "Core/PFCodeMath.h"
@@ -300,7 +302,8 @@ struct FTable : public IRoundListener
 	struct FLogItem { int Id; std::string Text; };
 	std::vector<FLogItem> Log;
 	int LogSeq = 0;
-	std::map<int32_t, FGuessResult> HumanTruth;
+	std::map<int32_t, FGuessResult> HumanTruth;                 // modo consola (un humano)
+	std::map<int32_t, FGuessResult> SeatTruth[kMaxPlayers];     // verdad privada por asiento (web)
 	FRoundStats Round;
 	double RoundStart = 0;
 	double KeyClueTime = -1;
@@ -332,6 +335,7 @@ struct FTable : public IRoundListener
 		KeyClueTime = -1;
 		Log.clear();
 		HumanTruth.clear();
+		for (int i = 0; i < kMaxPlayers; ++i) SeatTruth[i].clear();
 		LastPrivate.clear();
 		BoardRevision++;
 		for (auto& B : Bots) B->ResetForRound(Now, Config.CodeLength);
@@ -353,6 +357,7 @@ struct FTable : public IRoundListener
 			break;
 		case EEventType::GuessResult:
 			if (E.Player < kMaxPlayers && Bots[E.Player]) { Bots[E.Player]->MyTruth[E.Seq] = FGuessResult{ E.Aux0, E.Aux1 }; Bots[E.Player]->SeenRevision = -1; }
+			if (E.Player < kMaxPlayers) SeatTruth[E.Player][E.Seq] = FGuessResult{ E.Aux0, E.Aux1 };
 			if ((int)E.Player == HumanSeat)
 			{
 				HumanTruth[E.Seq] = FGuessResult{ E.Aux0, E.Aux1 };
@@ -360,12 +365,12 @@ struct FTable : public IRoundListener
 			}
 			break;
 		case EEventType::GuessRejected:
-			if ((int)E.Player == HumanSeat)
-			{
-				static const char* R[] = { "", "ronda no activa", "jugador desconocido", "desconectado", "intento invalido", "demasiado rapido", "reloj expirado (Paso)", "ronda terminada", "historial lleno", "no es tu turno" };
-				Push("Intento rechazado: " + std::string(E.Value >= 0 && E.Value < 10 ? R[E.Value] : "?"));
-			}
+		{
+			static const char* R[] = { "", "ronda no activa", "jugador desconocido", "desconectado", "intento invalido", "demasiado rapido", "reloj expirado (Paso)", "ronda terminada", "historial lleno", "no es tu turno" };
+			const std::string Why = (E.Value >= 0 && E.Value < 10) ? R[E.Value] : "?";
+			if (E.Player < kMaxPlayers && Profiles[E.Player] == EProfile::Human) Push(Who + ": intento rechazado (" + Why + ")");
 			break;
+		}
 		case EEventType::Pass:            Round.Passes++; break;
 		case EEventType::PlayerInactive:  Round.Inactives++; Push(Who + " esta INACTIVO"); break;
 		case EEventType::Score:
@@ -719,11 +724,51 @@ static std::map<std::string, std::string> ParseQuery(const std::string& Q)
 }
 
 static const char* kFirstNames[] = { "Lucia", "Mateo", "Sofia", "Diego", "Valeria", "Andres", "Camila", "Tomas" };
+static constexpr int kMinPlayers = 2;
+
+static std::mt19937_64& WebRng()
+{
+	static std::mt19937_64 R{ (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count() };
+	return R;
+}
+
+static std::string RandomToken()
+{
+	char Buf[33];
+	for (int i = 0; i < 16; ++i) std::snprintf(Buf + i * 2, 3, "%02x", (unsigned)(WebRng()() & 0xff));
+	return std::string(Buf, 32);
+}
+
+static std::string MakeRoomCode()
+{
+	static const char* A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+	std::string S;
+	for (int i = 0; i < 4; ++i) S += A[WebRng()() % 32];
+	return S;
+}
+
+static std::string SanitizeName(std::string S)
+{
+	std::string O;
+	for (unsigned char C : S)
+	{
+		if (O.size() >= 16) break;
+		if (std::isalnum(C) || C == ' ' || C == '-' || C == '_') O += char(C);
+	}
+	while (!O.empty() && O.front() == ' ') O.erase(O.begin());
+	while (!O.empty() && O.back() == ' ') O.pop_back();
+	return O.empty() ? "Jugador" : O;
+}
 
 struct FWebSession
 {
 	enum class EPhase { Lobby, Countdown, Playing, Summary, MatchEnd };
+	struct FClient { std::string Token, Name; int Seat = -1; bool bHost = false; };
+
 	std::unique_ptr<FTable> T;
+	std::vector<FClient> Clients;
+	std::string RoomCode;
+	std::string PendingSetCookie;
 	EPhase Phase = EPhase::Lobby;
 	int RoundIndex = 0, NumRounds = 3;
 	double PhaseEnd = 0;
@@ -731,42 +776,122 @@ struct FWebSession
 	std::string WebNames[kMaxPlayers];
 	FRoundStats LastRound;
 	uint64_t Seed = 1;
-	bool bSpectator = false;
-	int Bots = 3;
+	int Bots = 0;
 	int RoundsPlayed = 0;
 	std::string PaceName = "slow";
+	double SessionAttempt = 0;
+	ETurnMode SessionTurns = ETurnMode::Simultaneous;
 
-	void NewMatch(int InBots, bool bHuman, double Now)
+	void ApplyGlobals() const
 	{
-		Bots = std::max(2, std::min(7, InBots));
-		bSpectator = !bHuman;
+		SetPace(PaceName);
+		gAttemptSeconds = SessionAttempt;
+		gTurnMode = SessionTurns;
+	}
+
+	FClient* FindClient(const std::string& Token)
+	{
+		if (Token.empty()) return nullptr;
+		for (auto& C : Clients) if (C.Token == Token) return &C;
+		return nullptr;
+	}
+	const FClient* FindClient(const std::string& Token) const
+	{
+		if (Token.empty()) return nullptr;
+		for (const auto& C : Clients) if (C.Token == Token) return &C;
+		return nullptr;
+	}
+
+	int TotalPlayers() const { return int(Clients.size()) + Bots; }
+
+	void ClampBots()
+	{
+		const int Room = kMaxPlayers - int(Clients.size());
+		if (Bots > Room) Bots = std::max(0, Room);
+		if (Bots < 0) Bots = 0;
+	}
+
+	void OpenLobby(int DefaultBots, bool bNewCode = true)
+	{
+		const std::string Keep = RoomCode;
+		if (bNewCode || RoomCode.empty()) RoomCode = MakeRoomCode();
+		else RoomCode = Keep;
+		Clients.clear();
+		T.reset();
+		Bots = std::max(0, std::min(kMaxPlayers - kMinPlayers, DefaultBots));
+		Phase = EPhase::Lobby;
+		PhaseEnd = 0;
+		RoundIndex = 0;
+		RoundsPlayed = 0;
+		for (int i = 0; i < kMaxPlayers; ++i) MatchScore[i] = 0;
+	}
+
+	bool AllHumansInactive() const
+	{
+		if (Phase == EPhase::Lobby) return Clients.empty();
+		if (!T) return true;
+		for (const auto& C : Clients)
+		{
+			if (C.Seat < 0 || C.Seat >= kMaxPlayers) continue;
+			const FPlayerSlot& P = T->Engine.GetPlayer(uint8_t(C.Seat));
+			if (P.bPresent && !P.bInactive) return false;
+		}
+		return true;
+	}
+
+	bool CanReset(const FClient* You) const
+	{
+		if (You && You->bHost) return true;
+		if (Phase == EPhase::Lobby) return true;
+		if (Phase == EPhase::MatchEnd) return true;
+		return AllHumansInactive();
+	}
+
+	void BuildTable()
+	{
+		ClampBots();
 		T = std::make_unique<FTable>();
 		T->bVerbose = false;
 		Seed = (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count();
 		int Seat = 0;
-		if (bHuman) { T->AddPlayer(EProfile::Human, Seed); WebNames[Seat++] = "Tu"; }
-		for (int i = 0; i < Bots; ++i)
+		for (auto& C : Clients)
 		{
-			T->AddPlayer(kBotRotation[i % 4], Seed + i + 1);
-			WebNames[Seat] = kFirstNames[Seat % 8]; ++Seat;
+			T->AddPlayer(EProfile::Human, Seed + uint64_t(Seat) * 17);
+			C.Seat = Seat;
+			WebNames[Seat] = C.Name;
+			T->Names[Seat] = C.Name;
+			++Seat;
 		}
-		for (int i = 0; i < T->NumPlayers; ++i) T->Names[i] = WebNames[i];   // los eventos usan los mismos nombres que la web
+		for (int i = 0; i < Bots && Seat < kMaxPlayers; ++i)
+		{
+			T->AddPlayer(kBotRotation[i % 4], Seed + uint64_t(Seat) * 31 + 1);
+			WebNames[Seat] = kFirstNames[Seat % 8];
+			T->Names[Seat] = WebNames[Seat];
+			++Seat;
+		}
 		for (int i = 0; i < kMaxPlayers; ++i) MatchScore[i] = 0;
-		RoundIndex = 0; RoundsPlayed = 0;
-		Phase = EPhase::Lobby;
-		PhaseEnd = bSpectator ? Now + 3.0 : 0;   // en espectador arranca solo
+		RoundIndex = 0;
+		RoundsPlayed = 0;
 	}
 
 	void BeginCountdown(double Now) { Phase = EPhase::Countdown; PhaseEnd = Now + 3.0; }
 
+	bool TryStart(double Now, std::string& Err)
+	{
+		ClampBots();
+		if (TotalPlayers() < kMinPlayers) { Err = "hacen falta al menos 2 jugadores (humanos o bots)"; return false; }
+		if (TotalPlayers() > kMaxPlayers) { Err = "maximo 8 jugadores"; return false; }
+		BuildTable();
+		BeginCountdown(Now);
+		return true;
+	}
+
 	void Tick(double Now)
 	{
-		if (!T) return;
+		ApplyGlobals();
+		if (Phase == EPhase::Lobby || !T) return;
 		switch (Phase)
 		{
-		case EPhase::Lobby:
-			if (bSpectator && Now >= PhaseEnd) BeginCountdown(Now);
-			break;
 		case EPhase::Countdown:
 			if (Now >= PhaseEnd) { T->StartRound(Seed * 31 + RoundIndex, Now); Phase = EPhase::Playing; }
 			break;
@@ -787,29 +912,69 @@ struct FWebSession
 				else { Phase = EPhase::MatchEnd; PhaseEnd = Now + 15.0; }
 			}
 			break;
-		case EPhase::MatchEnd:
-			if (bSpectator && Now >= PhaseEnd) NewMatch(Bots, false, Now);
-			break;
+		default: break;
 		}
 	}
 
-	std::string StateJson(double Now) const
+	void AppendMeta(std::string& J, const FClient* You, int HumanSeat, int Len, double Now) const
 	{
-		std::string J = "{";
-		if (!T) return "{\"phase\":\"none\"}";
-		const FRoundEngine& E = T->Engine;
-		const int Len = T->Config.CodeLength ? T->Config.CodeLength : (T->NumPlayers >= 6 ? 5 : 4);
 		static const char* PhaseNames[] = { "lobby", "countdown", "playing", "summary", "matchend" };
-		const bool bRoundActive = E.IsRoundActive();
-		char Buf[256];
-
-		std::snprintf(Buf, sizeof Buf, "\"phase\":\"%s\",\"round\":%d,\"rounds\":%d,\"len\":%d,\"now\":%.3f,\"phaseEnd\":%.3f,\"roundStart\":%.3f,\"spectator\":%s,\"humanSeat\":%d,",
-			PhaseNames[(int)Phase], RoundIndex + 1, NumRounds, Len, Now, PhaseEnd, T->RoundStart, bSpectator ? "true" : "false", T->HumanSeat);
+		char Buf[384];
+		const bool bJoined = You != nullptr;
+		const bool bHost = You && You->bHost;
+		std::snprintf(Buf, sizeof Buf,
+			"\"phase\":\"%s\",\"round\":%d,\"rounds\":%d,\"len\":%d,\"now\":%.3f,\"phaseEnd\":%.3f,\"roundStart\":%.3f,"
+			"\"spectator\":%s,\"humanSeat\":%d,\"joined\":%s,\"isHost\":%s,\"roomCode\":%s,\"bots\":%d,"
+			"\"minPlayers\":%d,\"maxPlayers\":%d,",
+			PhaseNames[(int)Phase], RoundIndex + 1, NumRounds, Len, Now, PhaseEnd, T ? T->RoundStart : 0.0,
+			bJoined ? "false" : "true", HumanSeat, bJoined ? "true" : "false", bHost ? "true" : "false",
+			JsonStr(RoomCode).c_str(), Bots, kMinPlayers, kMaxPlayers);
 		J += Buf;
 		J += "\"pace\":" + JsonStr(PaceName) + ",";
 		J += "\"attemptSeconds\":" + std::to_string(int(gAttemptSeconds > 0 ? gAttemptSeconds : FRoundConfig{}.AttemptSeconds)) + ",";
 		J += "\"sdAttemptSeconds\":" + std::to_string(int(FRoundConfig{}.SuddenDeathAttemptSeconds)) + ",";
 		J += "\"turnMode\":" + JsonStr(TurnModeName(gTurnMode)) + ",";
+	}
+
+	std::string StateJson(double Now, const std::string& Token) const
+	{
+		ApplyGlobals();
+		const FClient* You = FindClient(Token);
+		std::string J = "{";
+		char Buf[384];
+
+		if (Phase == EPhase::Lobby || !T)
+		{
+			const int Humans = int(Clients.size());
+			const int Total = Humans + Bots;
+			const int Len = Total >= 6 ? 5 : 4;
+			int HumanSeat = -1;
+			if (You) { for (int i = 0; i < Humans; ++i) if (Clients[size_t(i)].Token == You->Token) HumanSeat = i; }
+			AppendMeta(J, You, HumanSeat, Len, Now);
+			J += "\"turnPlayer\":-1,\"turnNumber\":0,\"turnOrder\":[],\"secret\":null,\"winner\":-1,\"alertPlayer\":-1,\"suddenDeathEnd\":0,";
+			J += "\"players\":[";
+			for (int i = 0; i < Humans; ++i)
+			{
+				std::snprintf(Buf, sizeof Buf, "%s{\"seat\":%d,\"name\":%s,\"profile\":\"humano\",\"bestF\":0,\"bestP\":0,\"attempts\":0,\"roundScore\":0,\"matchScore\":0,\"deadline\":0,\"encrypt\":true,\"decoy\":true,\"inactive\":false,\"solved\":false}",
+					i ? "," : "", i, JsonStr(Clients[size_t(i)].Name).c_str());
+				J += Buf;
+			}
+			for (int i = 0; i < Bots; ++i)
+			{
+				const int Seat = Humans + i;
+				std::snprintf(Buf, sizeof Buf, "%s{\"seat\":%d,\"name\":%s,\"profile\":\"%s\",\"bestF\":0,\"bestP\":0,\"attempts\":0,\"roundScore\":0,\"matchScore\":0,\"deadline\":0,\"encrypt\":true,\"decoy\":true,\"inactive\":false,\"solved\":false}",
+					(Humans + i) ? "," : "", Seat, JsonStr(kFirstNames[Seat % 8]).c_str(), ProfileName(kBotRotation[i % 4]));
+				J += Buf;
+			}
+			J += "],\"entries\":[],\"private\":[],\"events\":[]}";
+			return J;
+		}
+
+		const FRoundEngine& E = T->Engine;
+		const int Len = T->Config.CodeLength ? T->Config.CodeLength : (T->NumPlayers >= 6 ? 5 : 4);
+		const bool bRoundActive = E.IsRoundActive();
+		const int HumanSeat = You && You->Seat >= 0 ? You->Seat : -1;
+		AppendMeta(J, You, HumanSeat, Len, Now);
 		J += "\"turnPlayer\":" + std::to_string(bRoundActive && E.IsTurnBased() && E.GetCurrentTurnPlayer() != kNoPlayer ? (int)E.GetCurrentTurnPlayer() : -1) + ",";
 		J += "\"turnNumber\":" + std::to_string(E.GetTurnNumber()) + ",";
 		J += "\"turnOrder\":[";
@@ -826,8 +991,9 @@ struct FWebSession
 		for (int i = 0; i < T->NumPlayers; ++i)
 		{
 			const FPlayerSlot& S = E.GetPlayer(uint8_t(i));
+			const char* Prof = T->Profiles[i] == EProfile::Human ? "humano" : ProfileName(T->Profiles[i]);
 			std::snprintf(Buf, sizeof Buf, "%s{\"seat\":%d,\"name\":%s,\"profile\":\"%s\",\"bestF\":%d,\"bestP\":%d,\"attempts\":%d,\"roundScore\":%d,\"matchScore\":%d,\"deadline\":%.3f,\"encrypt\":%s,\"decoy\":%s,\"inactive\":%s,\"solved\":%s}",
-				i ? "," : "", i, JsonStr(WebNames[i]).c_str(), ProfileName(T->Profiles[i]), S.BestFamas, S.BestPicas, S.Attempts, S.RoundScore, MatchScore[i] + (bRoundActive ? S.RoundScore : 0),
+				i ? "," : "", i, JsonStr(WebNames[i]).c_str(), Prof, S.BestFamas, S.BestPicas, S.Attempts, S.RoundScore, MatchScore[i] + (bRoundActive ? S.RoundScore : 0),
 				S.AttemptDeadline, S.bHasEncryptToken ? "true" : "false", S.bHasDecoyToken ? "true" : "false", S.bInactive ? "true" : "false", S.BestFamas >= Len ? "true" : "false");
 			J += Buf;
 		}
@@ -844,12 +1010,15 @@ struct FWebSession
 		}
 		J += "],\"private\":[";
 		bool bFirst = true;
-		for (const auto& KV : T->HumanTruth)
+		if (HumanSeat >= 0 && HumanSeat < kMaxPlayers)
 		{
-			const FGuessEntry* G = E.FindEntry(KV.first);
-			if (!G) continue;
-			std::snprintf(Buf, sizeof Buf, "%s{\"seq\":%d,\"guess\":%s,\"f\":%d,\"p\":%d}", bFirst ? "" : ",", KV.first, JsonStr(CodeStr(G->Guess, Len)).c_str(), KV.second.Famas, KV.second.Picas);
-			J += Buf; bFirst = false;
+			for (const auto& KV : T->SeatTruth[HumanSeat])
+			{
+				const FGuessEntry* G = E.FindEntry(KV.first);
+				if (!G) continue;
+				std::snprintf(Buf, sizeof Buf, "%s{\"seq\":%d,\"guess\":%s,\"f\":%d,\"p\":%d}", bFirst ? "" : ",", KV.first, JsonStr(CodeStr(G->Guess, Len)).c_str(), KV.second.Famas, KV.second.Picas);
+				J += Buf; bFirst = false;
+			}
 		}
 		J += "],\"events\":[";
 		for (size_t i = 0; i < T->Log.size(); ++i)
@@ -860,32 +1029,102 @@ struct FWebSession
 		return J;
 	}
 
-	std::string HandleApi(const std::string& Path, const std::map<std::string, std::string>& Q, double Now)
+	std::string HandleApi(const std::string& Path, const std::map<std::string, std::string>& Q, const std::string& TokenIn, double Now)
 	{
-		if (Path == "/api/state") return StateJson(Now);
-		if (Path == "/api/new")
+		ApplyGlobals();
+		PendingSetCookie.clear();
+		const std::string Token = Q.count("token") ? Q.at("token") : TokenIn;
+		FClient* You = FindClient(Token);
+
+		if (Path == "/api/state" || Path == "/api/stream") return StateJson(Now, Token);
+
+		if (Path == "/api/join")
 		{
-			const int B = Q.count("bots") ? std::atoi(Q.at("bots").c_str()) : 3;
-			const bool bHuman = !Q.count("human") || Q.at("human") != "0";
-			if (Q.count("pace")) { SetPace(Q.at("pace")); PaceName = Q.at("pace"); }
-			if (Q.count("attempt")) { const int A = std::atoi(Q.at("attempt").c_str()); gAttemptSeconds = (A >= 5 && A <= 60) ? A : 0; }
-			if (Q.count("turns")) gTurnMode = ParseTurnMode(Q.at("turns"));
-			NewMatch(B, bHuman, Now);
+			if (Phase != EPhase::Lobby && Phase != EPhase::MatchEnd) return "{\"ok\":false,\"error\":\"la partida ya empezo\"}";
+			if (You) return "{\"ok\":true,\"token\":" + JsonStr(You->Token) + ",\"code\":" + JsonStr(RoomCode) + ",\"host\":" + std::string(You->bHost ? "true" : "false") + "}";
+			if (Q.count("code") && !Q.at("code").empty() && Q.at("code") != RoomCode) return "{\"ok\":false,\"error\":\"codigo de sala incorrecto\"}";
+			if (int(Clients.size()) >= kMaxPlayers) return "{\"ok\":false,\"error\":\"sala llena\"}";
+			FClient C;
+			C.Token = RandomToken();
+			C.Name = SanitizeName(Q.count("name") ? Q.at("name") : "");
+			C.bHost = Clients.empty();
+			C.Seat = -1;
+			Clients.push_back(C);
+			ClampBots();
+			PendingSetCookie = C.Token;
+			return "{\"ok\":true,\"token\":" + JsonStr(C.Token) + ",\"code\":" + JsonStr(RoomCode) + ",\"host\":" + std::string(C.bHost ? "true" : "false") + "}";
+		}
+
+		if (Path == "/api/reset")
+		{
+			if (!CanReset(You)) return "{\"ok\":false,\"error\":\"hay una partida activa\"}";
+			OpenLobby(0, false);
+			return "{\"ok\":true,\"code\":" + JsonStr(RoomCode) + "}";
+		}
+
+		if (Path == "/api/solo")
+		{
+			if (!CanReset(You)) return "{\"ok\":false,\"error\":\"hay una partida activa con amigos\"}";
+			const int WantBots = Q.count("bots") ? std::atoi(Q.at("bots").c_str()) : 3;
+			OpenLobby(WantBots, false);
+			FClient C;
+			C.Token = RandomToken();
+			C.Name = SanitizeName(Q.count("name") ? Q.at("name") : "");
+			C.bHost = true;
+			C.Seat = -1;
+			Clients.push_back(C);
+			Bots = std::max(1, std::min(kMaxPlayers - 1, WantBots));
+			std::string Err;
+			if (!TryStart(Now, Err)) return "{\"ok\":false,\"error\":" + JsonStr(Err) + "}";
+			PendingSetCookie = C.Token;
+			return "{\"ok\":true,\"token\":" + JsonStr(C.Token) + ",\"code\":" + JsonStr(RoomCode) + ",\"host\":true}";
+		}
+
+		if (Path == "/api/leave")
+		{
+			if (!You) return "{\"ok\":false,\"error\":\"no estas en la sala\"}";
+			if (Phase != EPhase::Lobby) return "{\"ok\":false,\"error\":\"solo puedes salir en la sala\"}";
+			const bool bWasHost = You->bHost;
+			Clients.erase(Clients.begin() + (You - Clients.data()));
+			if (bWasHost && !Clients.empty()) Clients[0].bHost = true;
+			ClampBots();
 			return "{\"ok\":true}";
 		}
-		if (!T) return "{\"ok\":false,\"error\":\"sin partida\"}";
+
+		if (Path == "/api/config" || Path == "/api/new")
+		{
+			if (!You || !You->bHost) return "{\"ok\":false,\"error\":\"solo el anfitrion configura la sala\"}";
+			if (Phase != EPhase::Lobby && Phase != EPhase::MatchEnd) return "{\"ok\":false,\"error\":\"la partida ya empezo\"}";
+			if (Q.count("bots")) Bots = std::atoi(Q.at("bots").c_str());
+			if (Q.count("pace")) { PaceName = Q.at("pace"); SetPace(PaceName); }
+			if (Q.count("attempt")) { const int A = std::atoi(Q.at("attempt").c_str()); SessionAttempt = (A >= 5 && A <= 60) ? A : 0; gAttemptSeconds = SessionAttempt; }
+			if (Q.count("turns")) { SessionTurns = ParseTurnMode(Q.at("turns")); gTurnMode = SessionTurns; }
+			ClampBots();
+			return "{\"ok\":true,\"bots\":" + std::to_string(Bots) + "}";
+		}
+
 		if (Path == "/api/start")
 		{
-			if (Phase == EPhase::Lobby) BeginCountdown(Now);
-			else if (Phase == EPhase::MatchEnd) { NewMatch(Bots, !bSpectator, Now); if (!bSpectator) BeginCountdown(Now); }
+			if (!You || !You->bHost) return "{\"ok\":false,\"error\":\"solo el anfitrion empieza\"}";
+			if (Phase == EPhase::MatchEnd)
+			{
+				std::string Err;
+				if (!TryStart(Now, Err)) return "{\"ok\":false,\"error\":" + JsonStr(Err) + "}";
+				return "{\"ok\":true}";
+			}
+			if (Phase != EPhase::Lobby) return "{\"ok\":false,\"error\":\"la partida ya empezo\"}";
+			std::string Err;
+			if (!TryStart(Now, Err)) return "{\"ok\":false,\"error\":" + JsonStr(Err) + "}";
 			return "{\"ok\":true}";
 		}
-		if (T->HumanSeat < 0) return "{\"ok\":false,\"error\":\"modo espectador\"}";
-		const uint8_t Seat = uint8_t(T->HumanSeat);
+
+		if (!You || You->Seat < 0) return "{\"ok\":false,\"error\":\"no estas sentado en esta ronda\"}";
+		if (!T) return "{\"ok\":false,\"error\":\"sin partida\"}";
+		const uint8_t Seat = uint8_t(You->Seat);
 		if (Path == "/api/suspect")
 		{
 			const int Seq = Q.count("seq") ? std::atoi(Q.at("seq").c_str()) : -1;
-			if (Seq >= 0) { T->Engine.Suspect(Seat, Seq, Now); T->Push("Sospechas de la entrada #" + std::to_string(Seq)); }
+			if (Seq >= 0) { T->Engine.Suspect(Seat, Seq, Now); T->Push(You->Name + " sospecha de #" + std::to_string(Seq)); }
 			return "{\"ok\":true}";
 		}
 		if (Path == "/api/guess")
@@ -912,6 +1151,102 @@ struct FWebSession
 			return "{\"ok\":true}";
 		}
 		return "{\"ok\":false,\"error\":\"ruta desconocida\"}";
+	}
+};
+
+static std::string NormCode(std::string S)
+{
+	for (char& C : S) C = char(std::toupper((unsigned char)C));
+	return S;
+}
+
+static std::string LandingJson(double Now)
+{
+	char Buf[512];
+	std::snprintf(Buf, sizeof Buf,
+		"{\"phase\":\"none\",\"round\":1,\"rounds\":3,\"len\":4,\"now\":%.3f,\"phaseEnd\":0,\"roundStart\":0,"
+		"\"spectator\":true,\"humanSeat\":-1,\"joined\":false,\"isHost\":false,\"roomCode\":\"\",\"bots\":0,"
+		"\"minPlayers\":%d,\"maxPlayers\":%d,\"pace\":\"slow\",\"attemptSeconds\":10,\"sdAttemptSeconds\":6,"
+		"\"turnMode\":\"simultaneous\",\"turnPlayer\":-1,\"turnNumber\":0,\"turnOrder\":[],\"secret\":null,"
+		"\"winner\":-1,\"alertPlayer\":-1,\"suddenDeathEnd\":0,\"players\":[],\"entries\":[],\"private\":[],\"events\":[]}",
+		Now, kMinPlayers, kMaxPlayers);
+	return Buf;
+}
+
+struct FRoomHub
+{
+	std::map<std::string, std::unique_ptr<FWebSession>> ByCode;
+	std::map<std::string, std::string> TokenRoom;
+	std::string LastCookie;
+	int DefaultBots = 0;
+
+	FWebSession* NewRoom()
+	{
+		auto S = std::make_unique<FWebSession>();
+		S->OpenLobby(DefaultBots);
+		int Guard = 0;
+		while (ByCode.count(S->RoomCode) && Guard++ < 32) S->RoomCode = MakeRoomCode();
+		FWebSession* P = S.get();
+		ByCode[P->RoomCode] = std::move(S);
+		return P;
+	}
+
+	FWebSession* Find(const std::string& Token, const std::map<std::string, std::string>& Q)
+	{
+		if (!Token.empty())
+		{
+			auto It = TokenRoom.find(Token);
+			if (It != TokenRoom.end())
+			{
+				auto R = ByCode.find(It->second);
+				if (R != ByCode.end()) return R->second.get();
+			}
+		}
+		if (Q.count("code") && !Q.at("code").empty())
+		{
+			auto R = ByCode.find(NormCode(Q.at("code")));
+			if (R != ByCode.end()) return R->second.get();
+		}
+		return nullptr;
+	}
+
+	void Track(FWebSession* R)
+	{
+		if (!R) return;
+		LastCookie = R->PendingSetCookie;
+		if (!R->PendingSetCookie.empty()) TokenRoom[R->PendingSetCookie] = R->RoomCode;
+		for (const auto& C : R->Clients) TokenRoom[C.Token] = R->RoomCode;
+	}
+
+	void TickAll(double Now)
+	{
+		for (auto& KV : ByCode) KV.second->Tick(Now);
+	}
+
+	std::string Handle(const std::string& Path, std::map<std::string, std::string> Q, const std::string& Token, double Now)
+	{
+		LastCookie.clear();
+		if (Q.count("code")) Q["code"] = NormCode(Q["code"]);
+		const bool bHasCode = Q.count("code") && !Q["code"].empty();
+		const bool bFresh = Token.empty() && !bHasCode;
+		if (Path == "/api/solo" || Path == "/api/create" || (Path == "/api/join" && bFresh))
+		{
+			FWebSession* R = NewRoom();
+			const std::string P = (Path == "/api/create") ? "/api/join" : Path;
+			std::string Body = R->HandleApi(P, Q, "", Now);
+			Track(R);
+			return Body;
+		}
+		FWebSession* R = Find(Token, Q);
+		if (!R)
+		{
+			if (Path == "/api/state" || Path == "/api/stream") return LandingJson(Now);
+			if (Path == "/api/join") return "{\"ok\":false,\"error\":\"esa sala no existe\"}";
+			return "{\"ok\":false,\"error\":\"crea una sala o entra con el enlace\"}";
+		}
+		std::string Body = R->HandleApi(Path, Q, Token, Now);
+		Track(R);
+		return Body;
 	}
 };
 
@@ -946,12 +1281,29 @@ static const char* MimeFor(const std::string& Path)
 	return "application/octet-stream";
 }
 
-static std::string HttpResponse(const std::string& Body, const char* Type, int Code = 200, bool bImmutable = false)
+static std::string HttpResponse(const std::string& Body, const char* Type, int Code = 200, bool bImmutable = false, const std::string& Extra = "")
 {
 	return "HTTP/1.1 " + std::to_string(Code) + (Code == 200 ? " OK" : " Not Found") + "\r\nContent-Type: " + Type +
 		"\r\nContent-Length: " + std::to_string(Body.size()) +
 		"\r\nCache-Control: " + (bImmutable ? "public, max-age=31536000, immutable" : "no-store") +
-		"\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n" + Body;
+		"\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: *\r\nConnection: close" + Extra + "\r\n\r\n" + Body;
+}
+
+static std::string TokenFromRequest(const std::string& Req, const std::map<std::string, std::string>& Q)
+{
+	if (Q.count("token") && !Q.at("token").empty()) return Q.at("token");
+	size_t P = Req.find("\r\nCookie:");
+	if (P == std::string::npos) P = Req.find("\nCookie:");
+	if (P == std::string::npos) return "";
+	size_t End = Req.find("\r\n", P + 2);
+	if (End == std::string::npos) End = Req.find('\n', P + 1);
+	const std::string Cookies = Req.substr(P, End == std::string::npos ? std::string::npos : End - P);
+	const size_t T = Cookies.find("pf=");
+	if (T == std::string::npos) return "";
+	size_t B = T + 3, E = Cookies.find(';', B);
+	std::string Tok = Cookies.substr(B, E == std::string::npos ? std::string::npos : E - B);
+	while (!Tok.empty() && (Tok.back() == '\r' || Tok.back() == ' ')) Tok.pop_back();
+	return Tok;
 }
 
 static std::string ServeStatic(const std::string& WebDir, std::string Path)
@@ -961,7 +1313,22 @@ static std::string ServeStatic(const std::string& WebDir, std::string Path)
 	return ReadFile(WebDir + Path);
 }
 
-static int RunServe(int Port, int Bots, bool bSpectator, const std::string& WebDir)
+struct FSseClient { int Fd; std::string Token; };
+
+static bool SendSse(int Fd, const std::string& Json)
+{
+	const std::string Frame = "data: " + Json + "\n\n";
+	size_t Off = 0;
+	while (Off < Frame.size())
+	{
+		const ssize_t N = send(Fd, Frame.data() + Off, Frame.size() - Off, 0);
+		if (N <= 0) return false;
+		Off += size_t(N);
+	}
+	return true;
+}
+
+static int RunServe(int Port, int DefaultBots, const std::string& WebDir)
 {
 	if (ReadFile(WebDir + "/index.html").empty())
 	{
@@ -970,32 +1337,52 @@ static int RunServe(int Port, int Bots, bool bSpectator, const std::string& WebD
 		return 1;
 	}
 
+	signal(SIGPIPE, SIG_IGN);
 	const int L = socket(AF_INET, SOCK_STREAM, 0);
 	int One = 1; setsockopt(L, SOL_SOCKET, SO_REUSEADDR, &One, sizeof One);
-	sockaddr_in Addr{}; Addr.sin_family = AF_INET; Addr.sin_port = htons(uint16_t(Port)); Addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	sockaddr_in Addr{}; Addr.sin_family = AF_INET; Addr.sin_port = htons(uint16_t(Port)); Addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	if (bind(L, (sockaddr*)&Addr, sizeof Addr) != 0) { std::perror("bind"); return 1; }
-	listen(L, 16);
+	listen(L, 32);
 	fcntl(L, F_SETFL, fcntl(L, F_GETFL) | O_NONBLOCK);
 
 	using ClockT = std::chrono::steady_clock;
 	const auto T0 = ClockT::now();
 	auto NowFn = [&]() { return 1000.0 + std::chrono::duration<double>(ClockT::now() - T0).count(); };
 
-	FWebSession S;
-	S.NewMatch(Bots, !bSpectator, NowFn());
-	std::printf("Picas y Famas sandbox web: http://127.0.0.1:%d/  (%s)\n", Port, bSpectator ? "espectador: solo bots" : "tu + bots");
-	std::printf("Ctrl+C para parar.\n");
+	FRoomHub Hub;
+	Hub.DefaultBots = DefaultBots;
+	std::vector<FSseClient> Sse;
+	std::printf("Picas y Famas sandbox web: http://127.0.0.1:%d/\n", Port);
+	std::printf("Salas bajo demanda · minimo %d, maximo %d jugadores\n", kMinPlayers, kMaxPlayers);
+	std::printf("Crea sala en el navegador e invita con el enlace. Ctrl+C para parar.\n");
+	std::fflush(stdout);
 
+	double LastSse = 0;
 	for (;;)
 	{
 		const double Now = NowFn();
-		S.Tick(Now);
+		Hub.TickAll(Now);
+
+		if (Now - LastSse >= 0.12)
+		{
+			LastSse = Now;
+			for (size_t i = 0; i < Sse.size();)
+			{
+				if (!SendSse(Sse[i].Fd, Hub.Handle("/api/state", {}, Sse[i].Token, Now)))
+				{
+					close(Sse[i].Fd);
+					Sse.erase(Sse.begin() + int(i));
+				}
+				else ++i;
+			}
+		}
 
 		for (int k = 0; k < 32; ++k)
 		{
 			const int C = accept(L, nullptr, nullptr);
 			if (C < 0) break;
-			fcntl(C, F_SETFL, fcntl(C, F_GETFL) & ~O_NONBLOCK);   // en BSD/macOS el aceptado hereda O_NONBLOCK del listener
+			fcntl(C, F_SETFL, fcntl(C, F_GETFL) & ~O_NONBLOCK);
+			int NoPipe = 1; setsockopt(C, SOL_SOCKET, SO_NOSIGPIPE, &NoPipe, sizeof NoPipe);
 			timeval Tv{ 0, 200000 }; setsockopt(C, SOL_SOCKET, SO_RCVTIMEO, &Tv, sizeof Tv);
 			std::string Req; char Buf[2048];
 			while (Req.find("\r\n\r\n") == std::string::npos && Req.size() < 65536)
@@ -1009,14 +1396,35 @@ static int RunServe(int Port, int Bots, bool bSpectator, const std::string& WebD
 			std::string Path = Target, Query;
 			const size_t Qm = Target.find('?');
 			if (Qm != std::string::npos) { Path = Target.substr(0, Qm); Query = Target.substr(Qm + 1); }
+			auto Q = ParseQuery(Query);
+			const std::string Tok = TokenFromRequest(Req, Q);
 
+			if (Path == "/api/stream")
+			{
+				const char* Head =
+					"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-store\r\n"
+					"Access-Control-Allow-Origin: *\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n";
+				SendAll(C, Head);
+				SendSse(C, Hub.Handle("/api/state", Q, Tok, NowFn()));
+				Sse.push_back({ C, Tok });
+				continue;
+			}
+
+			std::string Extra;
+			std::string Body;
+			if (Path.rfind("/api/", 0) == 0)
+			{
+				Body = Hub.Handle(Path, Q, Tok, NowFn());
+				if (!Hub.LastCookie.empty())
+					Extra = "\r\nSet-Cookie: pf=" + Hub.LastCookie + "; Path=/; SameSite=Lax; Max-Age=86400";
+			}
 			std::string Resp;
-			if (Path.rfind("/api/", 0) == 0) Resp = HttpResponse(S.HandleApi(Path, ParseQuery(Query), NowFn()), "application/json; charset=utf-8");
+			if (Path.rfind("/api/", 0) == 0) Resp = HttpResponse(Body, "application/json; charset=utf-8", 200, false, Extra);
 			else
 			{
-				const std::string Body = ServeStatic(WebDir, Path);
-				if (Body.empty()) Resp = HttpResponse("not found", "text/plain", 404);
-				else Resp = HttpResponse(Body, MimeFor(Path == "/" ? std::string("/index.html") : Path), 200, Path.rfind("/_next/", 0) == 0);
+				const std::string File = ServeStatic(WebDir, Path);
+				if (File.empty()) Resp = HttpResponse("not found", "text/plain", 404);
+				else Resp = HttpResponse(File, MimeFor(Path == "/" ? std::string("/index.html") : Path), 200, Path.rfind("/_next/", 0) == 0);
 			}
 			SendAll(C, Resp);
 			close(C);
@@ -1029,15 +1437,16 @@ int main(int Argc, char** Argv)
 {
 	std::string Mode = Argc > 1 ? Argv[1] : "play";
 	uint64_t Seed = (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count();
-	bool bQuiet = false, bSpectator = false;
+	bool bQuiet = false;
 	int Port = 8080;
+	bool bPortSet = false;
 	std::vector<int> Nums;
 	for (int i = 2; i < Argc; ++i)
 	{
 		if (!std::strcmp(Argv[i], "--seed") && i + 1 < Argc) { Seed = std::strtoull(Argv[++i], nullptr, 10); continue; }
 		if (!std::strcmp(Argv[i], "--quiet")) { bQuiet = true; continue; }
-		if (!std::strcmp(Argv[i], "--spectator")) { bSpectator = true; continue; }
-		if (!std::strcmp(Argv[i], "--port") && i + 1 < Argc) { Port = std::atoi(Argv[++i]); continue; }
+		if (!std::strcmp(Argv[i], "--spectator")) { continue; }
+		if (!std::strcmp(Argv[i], "--port") && i + 1 < Argc) { Port = std::atoi(Argv[++i]); bPortSet = true; continue; }
 		if (!std::strcmp(Argv[i], "--human")) { SetPace("normal"); continue; }
 		if (!std::strcmp(Argv[i], "--pace") && i + 1 < Argc) { SetPace(Argv[++i]); continue; }
 		if (!std::strcmp(Argv[i], "--attempt") && i + 1 < Argc) { gAttemptSeconds = std::atof(Argv[++i]); continue; }
@@ -1049,11 +1458,20 @@ int main(int Argc, char** Argv)
 	if (Mode == "sim")  return RunSim(Nums.size() > 0 ? Nums[0] : 200, Nums.size() > 1 ? Nums[1] : 5, Seed, bQuiet);
 	if (Mode == "serve")
 	{
-		if (gReadLatency == 0.0) SetPace("slow");   // en la web, por defecto ritmo de mesa (se puede cambiar en la sala)
+		if (!bPortSet)
+		{
+			if (const char* Env = std::getenv("PORT"))
+			{
+				const int P = std::atoi(Env);
+				if (P > 0) Port = P;
+			}
+		}
+		if (gReadLatency == 0.0) SetPace("slow");
 		std::string Dir = Argv[0]; const size_t Slash = Dir.find_last_of('/');
 		Dir = Slash == std::string::npos ? "." : Dir.substr(0, Slash);
-		return RunServe(Port, Nums.size() > 0 ? Nums[0] : 3, bSpectator, Dir + "/web");
+		return RunServe(Port, Nums.size() > 0 ? std::max(0, std::min(6, Nums[0])) : 0, Dir + "/web");
 	}
-	std::printf("uso: pf_sandbox play [bots] [--seed N] | sim [partidas] [jugadores] [--seed N] [--quiet] | serve [bots] [--port P] [--spectator]\n");
+	std::printf("uso: pf_sandbox play [bots] [--seed N] | sim [partidas] [jugadores] [--seed N] [--quiet] | serve [bots] [--port P]\n");
+	std::printf("     share.sh arranca serve + tunel gratis (Cloudflare) para jugar con amigos\n");
 	return 1;
 }

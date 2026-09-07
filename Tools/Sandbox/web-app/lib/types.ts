@@ -48,6 +48,12 @@ export type GameState = {
   roundStart: number;
   spectator: boolean;
   humanSeat: number;
+  joined: boolean;
+  isHost: boolean;
+  roomCode: string;
+  bots: number;
+  minPlayers: number;
+  maxPlayers: number;
   pace: Pace;
   attemptSeconds: number;
   sdAttemptSeconds: number;

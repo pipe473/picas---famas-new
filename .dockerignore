@@ -1,0 +1,10 @@
+.git
+**/.next
+**/node_modules
+**/out
+Tools/Sandbox/pf_sandbox
+*.uproject
+DerivedDataCache
+Intermediate
+Binaries
+Saved

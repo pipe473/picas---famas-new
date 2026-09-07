@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: picasyfamas
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/state
