@@ -46,10 +46,8 @@ export const Header = memo(function Header({ S }: { S: GameState }) {
   return (
     <header>
       <h1>
-        PICAS <span>y</span> FAMAS{" "}
-        <span style={{ color: "var(--muted)", fontWeight: 500, fontSize: 14, marginLeft: 10 }}>
-          El Enigma Único en Tiempo Real
-        </span>
+        PICAS <span>y</span> FAMAS
+        <span className="tag">El Enigma Único en Tiempo Real</span>
       </h1>
       <div className="hud">
         <div className="chip">
