@@ -26,7 +26,9 @@ export default function Game() {
   const pushToast = useCallback((t: Omit<ToastItem, "id">) => {
     const id = ++toastId.current;
     setToasts((xs) => [...xs, { id, ...t }]);
-    setTimeout(() => setToasts((xs) => xs.filter((x) => x.id !== id)), 2600);
+    // Se marca como saliente antes de quitarlo para que la animación de salida llegue a verse.
+    setTimeout(() => setToasts((xs) => xs.map((x) => (x.id === id ? { ...x, leaving: true } : x))), 2400);
+    setTimeout(() => setToasts((xs) => xs.filter((x) => x.id !== id)), 2650);
   }, []);
 
   const ingest = useCallback(
@@ -40,11 +42,13 @@ export default function Game() {
           if (/ALERTA/.test(e.text)) {
             sfx.alert();
             pushToast({ text: e.text, cls: "bad" });
-          } else if (/RELAMPAGO/.test(e.text)) pushToast({ text: e.text, cls: "gold" });
+          } else if (/RELAMPAGO|ACIERTA/.test(e.text)) pushToast({ text: e.text, cls: "gold" });
           else if (/PILLADO|rechazado/.test(e.text)) {
             sfx.bad();
             pushToast({ text: e.text, cls: "bad" });
-          } else if (/engano|FOTO-FINISH|intuicion/.test(e.text)) pushToast({ text: e.text });
+          } else if (/engano|senuelo|SEÑUELO/i.test(e.text)) pushToast({ text: e.text, cls: "trick" });
+          else if (/encript/i.test(e.text)) pushToast({ text: e.text, cls: "info" });
+          else if (/FOTO-FINISH|intuicion/.test(e.text)) pushToast({ text: e.text, cls: "hot" });
         }
       } else {
         for (const e of st.events) knownEv.current.add(e.id);
@@ -115,9 +119,14 @@ export default function Game() {
   if (!S) {
     return (
       <div className="overlay on">
-        <div className="card">
+        <div className="card" role="status" aria-live="polite">
           <h3>Conectando</h3>
-          <div className="sub">Esperando al sandbox en /api/state…</div>
+          <div className="loading" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </div>
+          <p className="lead">Esperando al sandbox en /api/state…</p>
         </div>
       </div>
     );

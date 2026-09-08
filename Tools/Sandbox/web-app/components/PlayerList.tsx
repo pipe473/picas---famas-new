@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { Dots } from "@/components/Dots";
+import { CrownIcon, LockIcon, MaskIcon } from "@/components/Icons";
 import { useNow } from "@/lib/clock";
 import { COLORS, type GameState, type Player } from "@/lib/types";
 
@@ -20,23 +21,34 @@ const DeadlineBar = memo(function DeadlineBar({
   const left = deadline > 0 ? Math.max(0, deadline - n) : 0;
   const total = alert ? sdAttemptSeconds || 6 : attemptSeconds || 10;
   const pct = deadline > 0 ? Math.min(100, (left / total) * 100) : 0;
+  const closing = left > 0 && left < 3;
   return (
-    <div className="bar">
-      <i className={left > 0 && left < 3 ? "hot" : ""} style={{ width: `${pct}%` }} />
-    </div>
+    <>
+      {/* Anillo de "a punto de responder": vive aquí para que solo este nodo se repinte a 60 fps. */}
+      {closing ? <span className="closing-ring" aria-hidden="true" /> : null}
+      <div className="bar">
+        <i className={closing ? "hot" : ""} style={{ width: `${pct}%` }} />
+      </div>
+    </>
   );
 });
 
 const PlayerCard = memo(function PlayerCard({
   p,
   S,
+  leader,
 }: {
   p: Player;
   S: GameState;
+  leader: boolean;
 }) {
   const isTurn = S.turnPlayer === p.seat && S.phase === "playing";
+  // "live": sigue en la ronda (ni resuelto ni inactivo). Enciende el LED de su color en el canto.
+  const isLive = S.phase === "playing" && !p.inactive && !p.solved;
   const cls = [
     "player",
+    isLive ? "live" : "",
+    leader ? "leader" : "",
     p.seat === S.humanSeat ? "me" : "",
     S.alertPlayer === p.seat ? "alert" : "",
     p.solved ? "solved" : "",
@@ -65,7 +77,14 @@ const PlayerCard = memo(function PlayerCard({
     <div className={cls} style={{ ["--c" as string]: COLORS[p.seat] }}>
       <div className="top">
         <div className="id">
-          <span className="name">{p.name}</span>
+          <span className="name">
+            {p.name}
+            {leader ? (
+              <span className="crown" title="Líder de la partida">
+                <CrownIcon />
+              </span>
+            ) : null}
+          </span>
           <span className="prof">
             {p.profile === "Tu" ? "humano" : p.profile}
             {orderIdx >= 0 ? <span title="orden de turno"> · {orderIdx + 1}º</span> : null}
@@ -82,8 +101,13 @@ const PlayerCard = memo(function PlayerCard({
         </span>
         <span className="state">
           {badge}
-          <span className="tokens">
-            {p.encrypt ? "🔒" : <s>🔒</s>} {p.decoy ? "🎭" : <s>🎭</s>}
+          <span className="tokens" aria-label={`Encriptar ${p.encrypt ? "disponible" : "gastado"}, señuelo ${p.decoy ? "disponible" : "gastado"}`}>
+            <span className={`tok${p.encrypt ? "" : " used"}`} title={p.encrypt ? "Encriptar disponible" : "Encriptar gastado"}>
+              <LockIcon />
+            </span>
+            <span className={`tok${p.decoy ? "" : " used"}`} title={p.decoy ? "Señuelo disponible" : "Señuelo gastado"}>
+              <MaskIcon />
+            </span>
           </span>
         </span>
       </div>
@@ -98,12 +122,16 @@ const PlayerCard = memo(function PlayerCard({
 });
 
 export const PlayerList = memo(function PlayerList({ S }: { S: GameState }) {
+  // Líder: máxima puntuación de partida, solo si ya hay puntos y no hay empate arriba.
+  const top = Math.max(0, ...S.players.map((p) => p.matchScore));
+  const leaders = S.players.filter((p) => p.matchScore === top && top > 0);
+  const leaderSeat = leaders.length === 1 ? leaders[0].seat : -1;
   return (
     <section className="panel">
       <h2>Jugadores</h2>
       <div className="players">
         {S.players.map((p) => (
-          <PlayerCard key={p.seat} p={p} S={S} />
+          <PlayerCard key={p.seat} p={p} S={S} leader={p.seat === leaderSeat} />
         ))}
       </div>
       <div className="legend">
