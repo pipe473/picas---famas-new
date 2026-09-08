@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useEffect, useState, type FormEvent } from "react";
+import { MusicIcon, MutedIcon } from "@/components/Icons";
 import {
   KIND_LABEL,
   MODE_LABEL,
@@ -35,7 +36,7 @@ export const SoundToggle = memo(function SoundToggle() {
       aria-expanded={open}
       title="Sonido: música de Spotify, solo efectos o silencio"
     >
-      <span aria-hidden="true">{mode === "silent" ? "🔇" : "♫"}</span> {MODE_LABEL[mode]}
+      {mode === "silent" ? <MutedIcon /> : <MusicIcon />} {MODE_LABEL[mode]}
     </button>
   );
 });
@@ -205,7 +206,7 @@ export const SoundDock = memo(function SoundDock() {
       ) : view === "mini" ? (
         <div className="sound-mini">
           <button type="button" className="sound-mini-open" onClick={() => sound.open()} title="Abrir el panel de sonido">
-            <span aria-hidden="true">♫</span>
+            <MusicIcon />
             <b>{current?.label}</b>
             <small>Spotify</small>
           </button>

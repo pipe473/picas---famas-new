@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { Dots } from "@/components/Dots";
+import { LockIcon, MaskIcon } from "@/components/Icons";
 import { useNow } from "@/lib/clock";
 import { COLORS, type GameState, type Player } from "@/lib/types";
 
@@ -82,8 +83,13 @@ const PlayerCard = memo(function PlayerCard({
         </span>
         <span className="state">
           {badge}
-          <span className="tokens">
-            {p.encrypt ? "🔒" : <s>🔒</s>} {p.decoy ? "🎭" : <s>🎭</s>}
+          <span className="tokens" aria-label={`Encriptar ${p.encrypt ? "disponible" : "gastado"}, señuelo ${p.decoy ? "disponible" : "gastado"}`}>
+            <span className={`tok${p.encrypt ? "" : " used"}`} title={p.encrypt ? "Encriptar disponible" : "Encriptar gastado"}>
+              <LockIcon />
+            </span>
+            <span className={`tok${p.decoy ? "" : " used"}`} title={p.decoy ? "Señuelo disponible" : "Señuelo gastado"}>
+              <MaskIcon />
+            </span>
           </span>
         </span>
       </div>

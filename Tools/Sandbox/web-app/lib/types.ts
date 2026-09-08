@@ -72,7 +72,7 @@ export type GameState = {
 };
 
 export type ApiResult = { ok: boolean; error?: string };
-export type ToastItem = { id: number; text: string; cls?: string };
+export type ToastItem = { id: number; text: string; cls?: string; leaving?: boolean };
 
 export const COLORS = [
   "var(--c0)",

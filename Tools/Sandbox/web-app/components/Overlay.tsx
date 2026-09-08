@@ -1,11 +1,14 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
 import { sfx } from "@/lib/audio";
 import { abortMatch, configRoom, createRoom, goHome, joinRoom, roomCodeFromUrl, setToken, startMatch, startSolo } from "@/lib/api";
 import { useNow } from "@/lib/clock";
 import { ShareInvite } from "@/components/ShareInvite";
+import { TrophyIcon } from "@/components/Icons";
 import { COLORS, type GameState, type Pace, type TurnMode } from "@/lib/types";
+
+const tone = (seat: number): CSSProperties => ({ ["--tone" as string]: COLORS[seat] });
 
 const Countdown = memo(function Countdown({ S }: { S: GameState }) {
   const n = useNow();
@@ -22,10 +25,13 @@ const Countdown = memo(function Countdown({ S }: { S: GameState }) {
       <h3>
         Ronda {S.round} de {S.rounds}
       </h3>
-      <div className="count">{k}</div>
-      <div className="sub">
-        Código de {S.len} dígitos · todos a por el mismo enigma
+      {/* La key reinicia la animación de entrada con cada número. */}
+      <div className="count" key={k} aria-live="assertive">
+        {k}
       </div>
+      <p className="lead">
+        Código de <b>{S.len} dígitos</b> · todos a por el mismo enigma
+      </p>
       <BackActions S={S} allowAbort />
     </>
   );
@@ -37,22 +43,18 @@ const Summary = memo(function Summary({ S }: { S: GameState }) {
   const rows = [...S.players]
     .sort((a, b) => b.roundScore - a.roundScore)
     .map((p) => (
-      <tr key={p.seat}>
-        <td style={{ color: COLORS[p.seat], fontWeight: 800 }}>{p.name}</td>
+      <tr key={p.seat} style={tone(p.seat)}>
+        <td className="who">{p.name}</td>
         <td className="n">
           {p.roundScore >= 0 ? "+" : ""}
           {p.roundScore}
         </td>
-        <td className="n" style={{ color: "var(--muted)" }}>
-          {p.matchScore} total
-        </td>
+        <td className="n total">{p.matchScore} total</td>
       </tr>
     ));
   return (
     <>
-      <h3>
-        Ronda {S.round} · el código era
-      </h3>
+      <h3>Ronda {S.round} · el código era</h3>
       <div className="code">
         {(S.secret ?? "").split(" ").map((d, i) => (
           <div className="tile" key={i}>
@@ -60,15 +62,20 @@ const Summary = memo(function Summary({ S }: { S: GameState }) {
           </div>
         ))}
       </div>
-      <div className="big" style={{ fontSize: 30, color: w ? COLORS[w.seat] : "var(--muted)" }}>
-        {w ? `🏆 ${w.name}` : "Nadie lo descifró"}
+      <div className="title small tone" style={w ? tone(w.seat) : { ["--tone" as string]: "var(--muted)" }}>
+        {w ? (
+          <>
+            <TrophyIcon />
+            {w.name}
+          </>
+        ) : (
+          "Nadie lo descifró"
+        )}
       </div>
       <table>
         <tbody>{rows}</tbody>
       </table>
-      <div className="sub" style={{ marginTop: 12 }}>
-        Siguiente ronda en {Math.ceil(Math.max(0, S.phaseEnd - n))} s
-      </div>
+      <p className="sub next-in">Siguiente ronda en {Math.ceil(Math.max(0, S.phaseEnd - n))} s</p>
       <BackActions S={S} allowAbort />
     </>
   );
@@ -83,32 +90,34 @@ const MatchEnd = memo(function MatchEnd({ S, onAgain }: { S: GameState; onAgain:
       <div className="podium">
         {pod.map((p, i) =>
           p ? (
-            <div className={`pod p${[2, 1, 3][i]}`} key={p.seat}>
-              <div style={{ color: COLORS[p.seat] }}>{p.name}</div>
+            <div className={`pod p${[2, 1, 3][i]}`} key={p.seat} style={tone(p.seat)}>
+              <div className="who" style={{ color: "var(--tone)" }}>
+                {p.name}
+              </div>
               <small>{p.matchScore} pts</small>
-              <div style={{ fontSize: 26 }}>{["🥈", "🥇", "🥉"][i]}</div>
+              <span className="rank">{[2, 1, 3][i]}</span>
             </div>
           ) : null,
         )}
       </div>
-      <table>
-        <tbody>
-          {order.slice(3).map((p) => (
-            <tr key={p.seat}>
-              <td style={{ color: COLORS[p.seat] }}>{p.name}</td>
-              <td className="n">{p.matchScore}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {order.length > 3 ? (
+        <table>
+          <tbody>
+            {order.slice(3).map((p) => (
+              <tr key={p.seat} style={tone(p.seat)}>
+                <td className="who">{p.name}</td>
+                <td className="n">{p.matchScore}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
       {S.isHost ? (
         <button type="button" className="btn" onClick={onAgain}>
-          UNA MÁS
+          Una más
         </button>
       ) : (
-        <div className="sub" style={{ marginTop: 16 }}>
-          Esperando a que el anfitrión abra otra partida…
-        </div>
+        <p className="sub next-in">Esperando a que el anfitrión abra otra partida…</p>
       )}
       <BackActions S={S} />
     </>
@@ -120,15 +129,17 @@ function BackActions({ S, allowAbort }: { S: GameState; allowAbort?: boolean }) 
     <div className="back-row">
       {allowAbort && S.isHost ? (
         <button type="button" className="btn ghost" onClick={() => void abortMatch()}>
-          TERMINAR PARTIDA
+          Terminar partida
         </button>
       ) : null}
       <button type="button" className="btn ghost" onClick={() => void goHome()}>
-        VOLVER AL MENÚ
+        Volver al menú
       </button>
     </div>
   );
 }
+
+const BOT_CHOICES = [1, 2, 3, 4, 5, 6, 7];
 
 function Join({ S }: { S: GameState }) {
   const invited = !!roomCodeFromUrl();
@@ -139,7 +150,7 @@ function Join({ S }: { S: GameState }) {
 
   const finish = (r: { ok?: boolean; token?: string; error?: string } | null) => {
     if (!r?.ok || !r.token) {
-      setErr(r?.error ?? "no se pudo entrar");
+      setErr(r?.error ?? "No se pudo entrar. Inténtalo de nuevo.");
       return false;
     }
     setToken(r.token);
@@ -163,62 +174,82 @@ function Join({ S }: { S: GameState }) {
     finish(r);
   };
 
+  const lead = invited
+    ? "Entras a la sala de un amigo. Todos atacáis el mismo código."
+    : busy
+      ? "Hay una partida en marcha en esta mesa. Empieza la tuya: contra bots o en una sala para amigos."
+      : "Todos descifráis el mismo código en tiempo real. Juega contra bots o crea una sala y comparte el enlace.";
+
   return (
     <>
-      <h3>{invited ? "Te han invitado" : "Cómo quieres jugar"}</h3>
-      <div className="big" style={{ fontSize: 36 }}>
-        {invited ? S.roomCode : "Picas y Famas"}
+      <h3>{invited ? "Te han invitado" : "Deducción en tiempo real"}</h3>
+      {invited ? (
+        <div className="title code-title">{S.roomCode}</div>
+      ) : (
+        <div className="title">
+          Picas <em>y</em> Famas
+        </div>
+      )}
+      <p className="lead">{lead}</p>
+
+      <div className="form">
+        <label className="field">
+          <span>Tu nombre</span>
+          <input
+            className="namein"
+            maxLength={16}
+            placeholder="Jugador"
+            autoComplete="nickname"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void (invited ? enterFriends() : playSolo());
+            }}
+          />
+        </label>
+        {!invited ? (
+          <div className="field">
+            <span id="bots-lbl">Rivales (bots)</span>
+            <div className="seg" role="radiogroup" aria-labelledby="bots-lbl">
+              {BOT_CHOICES.map((b) => (
+                <button
+                  key={b}
+                  type="button"
+                  role="radio"
+                  aria-checked={bots === b}
+                  className={bots === b ? "on" : ""}
+                  onClick={() => setBots(b)}
+                >
+                  {b}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
-      <div className="sub">
-        {invited
-          ? "Entras a la sala de un amigo. Todos atacáis el mismo código."
-          : busy
-            ? "Hay una partida en pantalla (a menudo una prueba colgada). Empieza una tuya: solo contra bots, o sala para amigos."
-            : "Solo: tú contra bots. Amigos: creas una sala y mandas el código por WhatsApp o con el enlace (Madrid, Barcelona, etc.)."}
-      </div>
-      <div className="opts">
-        <input
-          className="namein"
-          maxLength={16}
-          placeholder="Tu nombre"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void (invited ? enterFriends() : playSolo());
-          }}
-        />
-      </div>
+
       {err ? (
-        <div className="sub" style={{ color: "var(--red)", marginTop: 8 }}>
+        <div className="form-err" role="alert">
           {err}
         </div>
       ) : null}
-      {invited ? (
-        <button type="button" className="btn" onClick={() => void enterFriends()}>
-          ENTRAR A LA SALA
-        </button>
-      ) : (
-        <>
-          <div className="opts">
-            <label>
-              Bots
-              <select value={bots} onChange={(e) => setBots(Number(e.target.value))}>
-                {[1, 2, 3, 4, 5, 6, 7].map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <button type="button" className="btn" onClick={() => void playSolo()}>
-            JUGAR SOLO vs bots
+
+      <div className="cta">
+        {invited ? (
+          <button type="button" className="btn" onClick={() => void enterFriends()}>
+            Entrar a la sala
           </button>
-          <button type="button" className="btn ghost" onClick={() => void enterFriends()}>
-            CREAR SALA PARA AMIGOS
-          </button>
-        </>
-      )}
+        ) : (
+          <>
+            <button type="button" className="btn" onClick={() => void playSolo()}>
+              Jugar contra {bots} {bots === 1 ? "bot" : "bots"}
+            </button>
+            <button type="button" className="btn ghost" onClick={() => void enterFriends()}>
+              Crear sala para amigos
+            </button>
+          </>
+        )}
+      </div>
     </>
   );
 }
@@ -250,23 +281,32 @@ function Lobby({ S }: { S: GameState }) {
     setErr("");
     await apply();
     const r = await startMatch();
-    if (r && !r.ok) setErr(r.error ?? "no se pudo empezar");
+    if (r && !r.ok) setErr(r.error ?? "No se pudo empezar.");
   };
+
+  const startLabel =
+    humans <= 1
+      ? canStart
+        ? "Jugar contra bots"
+        : "Elige al menos 1 bot"
+      : canStart
+        ? "Empezar con amigos"
+        : "Mínimo 2 jugadores";
 
   return (
     <>
       <h3>Sala {S.roomCode}</h3>
-      <div className="big" style={{ fontSize: 40 }}>
-        {total} / {S.maxPlayers ?? 8}
+      <div className="big">
+        {total} <span style={{ color: "var(--muted)" }}>/ {S.maxPlayers ?? 8}</span>
       </div>
-      <div className="sub">
+      <p className="lead">
         Todos descifráis el <b>mismo código</b>.{" "}
         {humans <= 1
-          ? "Estás solo: añade bots y pulsa Jugar solo, o invita a un amigo por WhatsApp y espera."
+          ? "Estás solo: añade bots o invita a un amigo y espera a que entre."
           : S.isHost
             ? "Eres el anfitrión. Cuando estéis listos, empieza."
             : "Esperando a que el anfitrión empiece…"}
-      </div>
+      </p>
       <div className="seats">
         {S.players.map((p) => (
           <span key={p.seat} className="seat" style={{ borderColor: COLORS[p.seat], color: COLORS[p.seat] }}>
@@ -344,10 +384,16 @@ function Lobby({ S }: { S: GameState }) {
               </select>
             </label>
           </div>
-          {err ? <div className="sub" style={{ color: "var(--red)", marginTop: 8 }}>{err}</div> : null}
-          <button type="button" className="btn" disabled={!canStart} onClick={() => void begin()}>
-            {humans <= 1 ? (canStart ? "JUGAR SOLO vs bots" : "Elige al menos 1 bot") : canStart ? "EMPEZAR CON AMIGOS" : "Mínimo 2 jugadores"}
-          </button>
+          {err ? (
+            <div className="form-err" role="alert">
+              {err}
+            </div>
+          ) : null}
+          <div className="cta">
+            <button type="button" className="btn" disabled={!canStart} onClick={() => void begin()}>
+              {startLabel}
+            </button>
+          </div>
         </>
       ) : null}
       <BackActions S={S} />
@@ -359,7 +405,7 @@ export const Overlay = memo(function Overlay({ S }: { S: GameState }) {
   if (S.joined && S.phase === "playing") return null;
   return (
     <div className="overlay on">
-      <div className="card">
+      <div className="card" role="dialog" aria-modal="true">
         {!S.joined ? <Join S={S} /> : null}
         {S.joined && S.phase === "lobby" ? <Lobby S={S} /> : null}
         {S.joined && S.phase === "countdown" ? <Countdown S={S} /> : null}

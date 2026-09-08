@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useRef } from "react";
 import { Dots } from "@/components/Dots";
+import { LockIcon } from "@/components/Icons";
 import { Tiles } from "@/components/Tiles";
 import { sfx } from "@/lib/audio";
 import { useNow } from "@/lib/clock";
@@ -10,7 +11,11 @@ import { COLORS, type BoardEntry, type GameState } from "@/lib/types";
 
 const EncryptedLabel = memo(function EncryptedLabel({ reveal }: { reveal: number }) {
   const n = useNow();
-  return <span className="lock">🔒 ENCRIPTADO · {Math.max(0, reveal - n).toFixed(0)}s</span>;
+  return (
+    <span className="lock">
+      <LockIcon /> Encriptado · {Math.max(0, reveal - n).toFixed(0)}s
+    </span>
+  );
 });
 
 const EntryRow = memo(function EntryRow({
@@ -90,9 +95,16 @@ export const Board = memo(function Board({ S, onSuspect }: { S: GameState; onSus
     <section className="panel">
       <h2>Módulo del Enigma · todos los intentos son públicos</h2>
       <div className="board">
-        {rows.map((e) => (
-          <EntryRow key={e.seq} e={e} S={S} isNew={!known.current.has(e.seq)} onSuspect={onSuspect} />
-        ))}
+        {rows.length === 0 ? (
+          <div className="empty">
+            <b>Aún no hay intentos</b>
+            {S.phase === "playing" ? "El primero en enviar abre el tablero para todos." : "Los intentos de la ronda aparecerán aquí."}
+          </div>
+        ) : (
+          rows.map((e) => (
+            <EntryRow key={e.seq} e={e} S={S} isNew={!known.current.has(e.seq)} onSuspect={onSuspect} />
+          ))
+        )}
       </div>
     </section>
   );

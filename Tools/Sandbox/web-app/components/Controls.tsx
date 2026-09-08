@@ -1,13 +1,17 @@
 "use client";
 
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Dots } from "@/components/Dots";
+import { BackspaceIcon, LockIcon, MaskIcon, SendIcon } from "@/components/Icons";
 import { sfx } from "@/lib/audio";
 import { sendGuess } from "@/lib/api";
 import type { GameState, GuessMode, ToastItem } from "@/lib/types";
 
 // ToastItem is declared in Game; keep a local shape to avoid a cycle.
 type ToastFn = (t: Omit<ToastItem, "id">) => void;
+
+/** Feedback del display tras enviar: destello verde si entra, sacudida si el servidor lo rechaza. */
+type Pulse = "flash" | "shake" | null;
 
 export const Controls = memo(function Controls({
   S,
@@ -21,6 +25,9 @@ export const Controls = memo(function Controls({
   const [mode, setMode] = useState<GuessMode>("plain");
   const [fakeF, setFakeF] = useState(2);
   const [fakeP, setFakeP] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [pulse, setPulse] = useState<Pulse>(null);
+  const pulseTimer = useRef(0);
   const spectator = me < 0;
   const p = me >= 0 ? S.players[me] : null;
   const myTurn = S.turnMode === "simultaneous" || S.turnPlayer === me;
@@ -42,6 +49,14 @@ export const Controls = memo(function Controls({
     if (mode === "decoy" && !canDecoy) setMode("plain");
   }, [mode, canEncrypt, canDecoy]);
 
+  useEffect(() => () => window.clearTimeout(pulseTimer.current), []);
+
+  const fire = useCallback((kind: Exclude<Pulse, null>) => {
+    window.clearTimeout(pulseTimer.current);
+    setPulse(kind);
+    pulseTimer.current = window.setTimeout(() => setPulse(null), 450);
+  }, []);
+
   const pushDigit = useCallback(
     (v: string) => {
       setDigits((d) => (d.length < S.len && !d.includes(v) ? d + v : d));
@@ -52,16 +67,20 @@ export const Controls = memo(function Controls({
   const backspace = useCallback(() => setDigits((d) => d.slice(0, -1)), []);
 
   const send = useCallback(async () => {
-    if (digits.length !== S.len) return;
+    if (digits.length !== S.len || busy) return;
+    setBusy(true);
     const r = await sendGuess(digits, mode, fakeF, fakeP);
+    setBusy(false);
     if (r && !r.ok) {
       onToast({ text: r.error ?? "error", cls: "bad" });
       sfx.bad();
+      fire("shake");
       return;
     }
+    fire("flash");
     setDigits("");
     setMode("plain");
-  }, [digits, S.len, mode, fakeF, fakeP, onToast]);
+  }, [digits, S.len, mode, fakeF, fakeP, busy, onToast, fire]);
 
   useEffect(() => {
     if (spectator) return;
@@ -77,25 +96,37 @@ export const Controls = memo(function Controls({
     return () => document.removeEventListener("keydown", onKey);
   }, [spectator, pushDigit, backspace, send, S.phase, p]);
 
-  const sendLabel = waiting
-    ? `TURNO DE ${(S.players[S.turnPlayer] ?? { name: "…" }).name.toUpperCase()}`
-    : mode === "plain"
-      ? "ENVIAR"
-      : mode === "encrypt"
-        ? "ENVIAR ENCRIPTADO 🔒"
-        : "ENVIAR SEÑUELO 🎭";
+  const sendLabel = waiting ? (
+    <>Turno de {(S.players[S.turnPlayer] ?? { name: "…" }).name}</>
+  ) : mode === "plain" ? (
+    <>
+      Enviar <SendIcon />
+    </>
+  ) : mode === "encrypt" ? (
+    <>
+      <LockIcon /> Enviar encriptado
+    </>
+  ) : (
+    <>
+      <MaskIcon /> Enviar señuelo
+    </>
+  );
 
   return (
     <section className="panel" id="right">
       {!spectator && p ? (
         <div>
           <h2>Tu intento</h2>
-          <div className="display">
-            {Array.from({ length: S.len }, (_, i) => (
-              <div key={i} className={`tile ${i < digits.length ? "" : "empty"}`}>
-                {digits[i] ?? "·"}
-              </div>
-            ))}
+          <div className={`display${pulse ? ` ${pulse}` : ""}`} aria-label={`Intento: ${digits || "vacío"}`}>
+            {Array.from({ length: S.len }, (_, i) => {
+              const filled = i < digits.length;
+              const next = playing && i === digits.length;
+              return (
+                <div key={i} className={`tile ${filled ? "filled" : "empty"}${next ? " next" : ""}`}>
+                  {digits[i] ?? ""}
+                </div>
+              );
+            })}
           </div>
           <div className="keypad">
             {["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((v) => (
@@ -109,41 +140,53 @@ export const Controls = memo(function Controls({
                 {v}
               </button>
             ))}
-            <button type="button" className="key wide" onClick={backspace}>
-              ⌫
+            <button type="button" className="key wide" onClick={backspace} disabled={!digits} aria-label="Borrar último dígito">
+              <BackspaceIcon />
             </button>
           </div>
-          <div className="modes">
-            <button type="button" className={`mode${mode === "plain" ? " on" : ""}`} onClick={() => setMode("plain")}>
+          <div className="modes" role="radiogroup" aria-label="Modo de envío">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === "plain"}
+              className={`mode${mode === "plain" ? " on" : ""}`}
+              onClick={() => setMode("plain")}
+            >
               Normal
             </button>
             <button
               type="button"
+              role="radio"
+              aria-checked={mode === "encrypt"}
               className={`mode${mode === "encrypt" ? " on violet" : ""}`}
               disabled={!p.encrypt}
               onClick={() => setMode("encrypt")}
+              title="Tecla E"
             >
-              🔒 Encriptar
+              <LockIcon /> Encriptar
             </button>
             <button
               type="button"
+              role="radio"
+              aria-checked={mode === "decoy"}
               className={`mode${mode === "decoy" ? " on red" : ""}`}
               disabled={!p.decoy}
               onClick={() => setMode("decoy")}
+              title="Tecla S"
             >
-              🎭 Señuelo
+              <MaskIcon /> Señuelo
             </button>
           </div>
           {mode === "decoy" ? (
             <div className="fake">
               Fingir{" "}
-              <select value={fakeF} onChange={(e) => setFakeF(Number(e.target.value))}>
+              <select value={fakeF} onChange={(e) => setFakeF(Number(e.target.value))} aria-label="Famas fingidas">
                 {Array.from({ length: 5 }, (_, i) => (
                   <option key={i}>{i}</option>
                 ))}
               </select>{" "}
               Famas{" "}
-              <select value={fakeP} onChange={(e) => setFakeP(Number(e.target.value))}>
+              <select value={fakeP} onChange={(e) => setFakeP(Number(e.target.value))} aria-label="Picas fingidas">
                 {Array.from({ length: 5 }, (_, i) => (
                   <option key={i}>{i}</option>
                 ))}
@@ -151,7 +194,13 @@ export const Controls = memo(function Controls({
               Picas
             </div>
           ) : null}
-          <button type="button" className="send" disabled={!playing || digits.length !== S.len} onClick={() => void send()}>
+          <button
+            type="button"
+            className={`send${busy ? " busy" : ""}`}
+            disabled={!playing || digits.length !== S.len}
+            aria-busy={busy}
+            onClick={() => void send()}
+          >
             {sendLabel}
           </button>
         </div>
@@ -159,12 +208,12 @@ export const Controls = memo(function Controls({
 
       {!spectator ? (
         <>
-          <h2 style={{ marginTop: 14 }}>
-            Tus resultados reales <span style={{ color: "var(--violet)" }}>· privado</span>
+          <h2 className="gap">
+            Tus resultados reales <span className="priv-tag">· privado</span>
           </h2>
           <div className="priv">
             {S.private.length === 0 ? (
-              <div className="sub">Aquí verás la verdad de tus intentos, aunque farolees.</div>
+              <div className="empty tight">Aquí verás la verdad de tus intentos, aunque farolees.</div>
             ) : (
               [...S.private].reverse().map((r) => (
                 <div className="pr" key={r.seq}>
@@ -183,17 +232,21 @@ export const Controls = memo(function Controls({
         </>
       ) : null}
 
-      <h2 style={{ marginTop: 8 }}>Eventos</h2>
-      <div className="events">
-        {[...S.events].reverse().map((e) => {
-          const hot = /ACIERTA|RELAMPAGO|ALERTA|engano/i.test(e.text);
-          const bad = /PILLADO|rechazado|sin razon|INACTIVO/i.test(e.text);
-          return (
-            <div key={e.id} className={`ev ${hot ? "hot" : ""} ${bad ? "bad" : ""}`}>
-              {e.text}
-            </div>
-          );
-        })}
+      <h2 className="gap">Eventos</h2>
+      <div className="events" aria-live="polite">
+        {S.events.length === 0 ? (
+          <div className="empty tight">Sin eventos todavía.</div>
+        ) : (
+          [...S.events].reverse().map((e) => {
+            const hot = /ACIERTA|RELAMPAGO|ALERTA|engano/i.test(e.text);
+            const bad = /PILLADO|rechazado|sin razon|INACTIVO/i.test(e.text);
+            return (
+              <div key={e.id} className={`ev ${hot ? "hot" : ""} ${bad ? "bad" : ""}`}>
+                {e.text}
+              </div>
+            );
+          })
+        )}
       </div>
     </section>
   );

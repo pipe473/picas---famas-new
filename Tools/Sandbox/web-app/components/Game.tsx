@@ -26,7 +26,9 @@ export default function Game() {
   const pushToast = useCallback((t: Omit<ToastItem, "id">) => {
     const id = ++toastId.current;
     setToasts((xs) => [...xs, { id, ...t }]);
-    setTimeout(() => setToasts((xs) => xs.filter((x) => x.id !== id)), 2600);
+    // Se marca como saliente antes de quitarlo para que la animación de salida llegue a verse.
+    setTimeout(() => setToasts((xs) => xs.map((x) => (x.id === id ? { ...x, leaving: true } : x))), 2400);
+    setTimeout(() => setToasts((xs) => xs.filter((x) => x.id !== id)), 2650);
   }, []);
 
   const ingest = useCallback(
@@ -115,9 +117,14 @@ export default function Game() {
   if (!S) {
     return (
       <div className="overlay on">
-        <div className="card">
+        <div className="card" role="status" aria-live="polite">
           <h3>Conectando</h3>
-          <div className="sub">Esperando al sandbox en /api/state…</div>
+          <div className="loading" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </div>
+          <p className="lead">Esperando al sandbox en /api/state…</p>
         </div>
       </div>
     );
