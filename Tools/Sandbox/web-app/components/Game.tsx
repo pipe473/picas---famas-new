@@ -42,11 +42,13 @@ export default function Game() {
           if (/ALERTA/.test(e.text)) {
             sfx.alert();
             pushToast({ text: e.text, cls: "bad" });
-          } else if (/RELAMPAGO/.test(e.text)) pushToast({ text: e.text, cls: "gold" });
+          } else if (/RELAMPAGO|ACIERTA/.test(e.text)) pushToast({ text: e.text, cls: "gold" });
           else if (/PILLADO|rechazado/.test(e.text)) {
             sfx.bad();
             pushToast({ text: e.text, cls: "bad" });
-          } else if (/engano|FOTO-FINISH|intuicion/.test(e.text)) pushToast({ text: e.text });
+          } else if (/engano|senuelo|SEÑUELO/i.test(e.text)) pushToast({ text: e.text, cls: "trick" });
+          else if (/encript/i.test(e.text)) pushToast({ text: e.text, cls: "info" });
+          else if (/FOTO-FINISH|intuicion/.test(e.text)) pushToast({ text: e.text, cls: "hot" });
         }
       } else {
         for (const e of st.events) knownEv.current.add(e.id);

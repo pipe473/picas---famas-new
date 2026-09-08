@@ -10,6 +10,27 @@ import { COLORS, type GameState, type Pace, type TurnMode } from "@/lib/types";
 
 const tone = (seat: number): CSSProperties => ({ ["--tone" as string]: COLORS[seat] });
 
+/** Confeti CSS en la victoria de ronda: 14 piezas con posición, retardo, giro y color pseudoaleatorios pero estables. */
+function Confetti({ seat }: { seat: number }) {
+  const pieces = Array.from({ length: 14 }, (_, i) => {
+    const x = (i * 37 + 11) % 100;
+    const d = ((i * 53) % 40) / 100;
+    const r = 180 + ((i * 97) % 540);
+    const k = i % 3 === 0 ? "var(--gold)" : i % 3 === 1 ? COLORS[seat] : "var(--pica)";
+    return (
+      <i
+        key={i}
+        style={{ ["--x" as string]: `${x}%`, ["--d" as string]: `${d}s`, ["--r" as string]: `${r}deg`, ["--k" as string]: k } as CSSProperties}
+      />
+    );
+  });
+  return (
+    <div className="confetti" aria-hidden="true">
+      {pieces}
+    </div>
+  );
+}
+
 const Countdown = memo(function Countdown({ S }: { S: GameState }) {
   const n = useNow();
   const k = Math.ceil(Math.max(0.01, S.phaseEnd - n));
@@ -54,6 +75,7 @@ const Summary = memo(function Summary({ S }: { S: GameState }) {
     ));
   return (
     <>
+      {w ? <Confetti seat={w.seat} /> : null}
       <h3>
         Ronda <span className="num">{S.round}</span> · el código era
       </h3>

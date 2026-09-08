@@ -48,7 +48,7 @@ const EntryRow = memo(function EntryRow({
       <div className="who">{p ? p.name : "?"}</div>
       <Tiles code={e.guess} />
       <div className="result">
-        {e.hidden ? <EncryptedLabel reveal={e.reveal} /> : <Dots f={e.f} p={e.p} len={S.len} big />}
+        {e.hidden ? <EncryptedLabel reveal={e.reveal} /> : <Dots f={e.f} p={e.p} len={S.len} big reveal={isNew} />}
         <span className="lbl">
           {e.hidden ? "resultado oculto" : `${e.f} Fama${e.f !== 1 ? "s" : ""} · ${e.p} Pica${e.p !== 1 ? "s" : ""}`}
           {!e.hidden ? (
@@ -72,21 +72,32 @@ const EntryRow = memo(function EntryRow({
   );
 });
 
-export const Board = memo(function Board({ S, onSuspect }: { S: GameState; onSuspect: (seq: number) => void }) {
-  const known = useRef(new Set<number>());
-  const first = useRef(true);
-  const rows = [...S.entries].reverse();
+/** Una fila se considera "nueva" durante este tiempo: cubre entrada + revelado de puntos aunque lleguen más polls. */
+const NEW_MS = 1400;
 
+export const Board = memo(function Board({ S, onSuspect }: { S: GameState; onSuspect: (seq: number) => void }) {
+  // seq → instante en que se vio por primera vez (0 = ya estaba al montar, sin animación).
+  const seen = useRef(new Map<number, number>());
+  const first = useRef(true);
+  const now = Date.now();
+  const rows = [...S.entries].reverse();
+  for (const e of S.entries) {
+    if (!seen.current.has(e.seq)) seen.current.set(e.seq, first.current ? 0 : now);
+  }
+  const isNew = (seq: number) => {
+    const t = seen.current.get(seq) ?? 0;
+    return t > 0 && now - t < NEW_MS;
+  };
+
+  const played = useRef(new Set<number>());
   useEffect(() => {
     for (const e of S.entries) {
-      if (!known.current.has(e.seq)) {
-        known.current.add(e.seq);
-        if (!first.current) {
-          if (e.solved) sfx.solved();
-          else if (e.f >= S.len - 1 && !e.hidden) sfx.fama();
-          else sfx.entry(e.f);
-        }
-      }
+      if (played.current.has(e.seq)) continue;
+      played.current.add(e.seq);
+      if ((seen.current.get(e.seq) ?? 0) === 0) continue;
+      if (e.solved) sfx.solved();
+      else if (e.f >= S.len - 1 && !e.hidden) sfx.fama();
+      else sfx.entry(e.f);
     }
     first.current = false;
   }, [S.entries, S.len]);
@@ -102,7 +113,7 @@ export const Board = memo(function Board({ S, onSuspect }: { S: GameState; onSus
           </div>
         ) : (
           rows.map((e) => (
-            <EntryRow key={e.seq} e={e} S={S} isNew={!known.current.has(e.seq)} onSuspect={onSuspect} />
+            <EntryRow key={e.seq} e={e} S={S} isNew={isNew(e.seq)} onSuspect={onSuspect} />
           ))
         )}
       </div>

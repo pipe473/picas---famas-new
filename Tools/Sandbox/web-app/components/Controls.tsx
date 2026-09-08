@@ -2,16 +2,16 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Dots } from "@/components/Dots";
-import { BackspaceIcon, LockIcon, MaskIcon, SendIcon } from "@/components/Icons";
+import { GuessDisplay, type Pulse } from "@/components/GuessDisplay";
+import { Keypad } from "@/components/Keypad";
+import { ModeTabs } from "@/components/ModeTabs";
+import { SendButton } from "@/components/SendButton";
 import { sfx } from "@/lib/audio";
 import { sendGuess } from "@/lib/api";
 import type { GameState, GuessMode, ToastItem } from "@/lib/types";
 
 // ToastItem is declared in Game; keep a local shape to avoid a cycle.
 type ToastFn = (t: Omit<ToastItem, "id">) => void;
-
-/** Feedback del display tras enviar: destello verde si entra, sacudida si el servidor lo rechaza. */
-type Pulse = "flash" | "shake" | null;
 
 export const Controls = memo(function Controls({
   S,
@@ -33,6 +33,7 @@ export const Controls = memo(function Controls({
   const myTurn = S.turnMode === "simultaneous" || S.turnPlayer === me;
   const playing = S.phase === "playing" && !!p && !p.solved && myTurn;
   const waiting = S.phase === "playing" && S.turnMode !== "simultaneous" && !myTurn;
+  const complete = digits.length === S.len;
 
   useEffect(() => {
     if (S.phase === "playing") {
@@ -54,20 +55,25 @@ export const Controls = memo(function Controls({
   const fire = useCallback((kind: Exclude<Pulse, null>) => {
     window.clearTimeout(pulseTimer.current);
     setPulse(kind);
-    pulseTimer.current = window.setTimeout(() => setPulse(null), 450);
+    pulseTimer.current = window.setTimeout(() => setPulse(null), 500);
   }, []);
 
   const pushDigit = useCallback(
     (v: string) => {
-      setDigits((d) => (d.length < S.len && !d.includes(v) ? d + v : d));
+      setDigits((d) => {
+        if (d.length >= S.len || d.includes(v)) return d;
+        sfx.tick();
+        return d + v;
+      });
     },
     [S.len],
   );
 
   const backspace = useCallback(() => setDigits((d) => d.slice(0, -1)), []);
+  const clear = useCallback(() => setDigits(""), []);
 
   const send = useCallback(async () => {
-    if (digits.length !== S.len || busy) return;
+    if (!complete || busy) return;
     setBusy(true);
     const r = await sendGuess(digits, mode, fakeF, fakeP);
     setBusy(false);
@@ -80,13 +86,15 @@ export const Controls = memo(function Controls({
     fire("flash");
     setDigits("");
     setMode("plain");
-  }, [digits, S.len, mode, fakeF, fakeP, busy, onToast, fire]);
+  }, [complete, digits, mode, fakeF, fakeP, busy, onToast, fire]);
 
   useEffect(() => {
     if (spectator) return;
     const onKey = (e: KeyboardEvent) => {
-      if (/^[0-9]$/.test(e.key)) pushDigit(e.key);
-      else if (e.key === "Backspace") backspace();
+      if (/^[0-9]$/.test(e.key)) {
+        if (playing) pushDigit(e.key);
+      } else if (e.key === "Backspace") backspace();
+      else if (e.key === "Escape") clear();
       else if (e.key === "Enter") {
         if (S.phase === "playing") void send();
       } else if (e.key.toLowerCase() === "e" && p?.encrypt) setMode((m) => (m === "encrypt" ? "plain" : "encrypt"));
@@ -94,89 +102,16 @@ export const Controls = memo(function Controls({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [spectator, pushDigit, backspace, send, S.phase, p]);
-
-  const sendLabel = waiting ? (
-    <>Turno de {(S.players[S.turnPlayer] ?? { name: "…" }).name}</>
-  ) : mode === "plain" ? (
-    <>
-      Enviar <SendIcon />
-    </>
-  ) : mode === "encrypt" ? (
-    <>
-      <LockIcon /> Enviar encriptado
-    </>
-  ) : (
-    <>
-      <MaskIcon /> Enviar señuelo
-    </>
-  );
+  }, [spectator, playing, pushDigit, backspace, clear, send, S.phase, p]);
 
   return (
     <section className="panel" id="right">
       {!spectator && p ? (
-        <div>
+        <div className="attempt">
           <h2>Tu intento</h2>
-          <div className={`display${pulse ? ` ${pulse}` : ""}`} aria-label={`Intento: ${digits || "vacío"}`}>
-            {Array.from({ length: S.len }, (_, i) => {
-              const filled = i < digits.length;
-              const next = playing && i === digits.length;
-              return (
-                <div key={i} className={`tile ${filled ? "filled" : "empty"}${next ? " next" : ""}`}>
-                  {digits[i] ?? ""}
-                </div>
-              );
-            })}
-          </div>
-          <div className="keypad">
-            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((v) => (
-              <button
-                key={v}
-                type="button"
-                className="key"
-                disabled={!playing || digits.includes(v) || digits.length >= S.len}
-                onClick={() => pushDigit(v)}
-              >
-                {v}
-              </button>
-            ))}
-            <button type="button" className="key wide" onClick={backspace} disabled={!digits} aria-label="Borrar último dígito">
-              <BackspaceIcon />
-            </button>
-          </div>
-          <div className="modes" role="radiogroup" aria-label="Modo de envío">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={mode === "plain"}
-              className={`mode${mode === "plain" ? " on" : ""}`}
-              onClick={() => setMode("plain")}
-            >
-              Normal
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={mode === "encrypt"}
-              className={`mode${mode === "encrypt" ? " on violet" : ""}`}
-              disabled={!p.encrypt}
-              onClick={() => setMode("encrypt")}
-              title="Tecla E"
-            >
-              <LockIcon /> Encriptar
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={mode === "decoy"}
-              className={`mode${mode === "decoy" ? " on red" : ""}`}
-              disabled={!p.decoy}
-              onClick={() => setMode("decoy")}
-              title="Tecla S"
-            >
-              <MaskIcon /> Señuelo
-            </button>
-          </div>
+          <GuessDisplay digits={digits} len={S.len} active={playing} pulse={pulse} />
+          <Keypad digits={digits} len={S.len} enabled={playing} onDigit={pushDigit} onBackspace={backspace} onClear={clear} />
+          <ModeTabs mode={mode} canEncrypt={canEncrypt} canDecoy={canDecoy} onChange={setMode} />
           {mode === "decoy" ? (
             <div className="fake">
               Fingir{" "}
@@ -194,15 +129,14 @@ export const Controls = memo(function Controls({
               Picas
             </div>
           ) : null}
-          <button
-            type="button"
-            className={`send${busy ? " busy" : ""}`}
-            disabled={!playing || digits.length !== S.len}
-            aria-busy={busy}
+          <SendButton
+            mode={mode}
+            ready={complete}
+            busy={busy}
+            disabled={!playing || !complete}
+            waitingFor={waiting ? (S.players[S.turnPlayer] ?? { name: "…" }).name : null}
             onClick={() => void send()}
-          >
-            {sendLabel}
-          </button>
+          />
         </div>
       ) : null}
 

@@ -88,6 +88,15 @@ export function AlertIcon(p: IconProps) {
   );
 }
 
+export function CrownIcon(p: IconProps) {
+  return (
+    <Base {...p}>
+      <path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z" />
+      <path d="M5 19h14" />
+    </Base>
+  );
+}
+
 export function SendIcon(p: IconProps) {
   return (
     <Base {...p}>
