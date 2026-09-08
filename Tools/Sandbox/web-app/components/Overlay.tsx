@@ -165,6 +165,42 @@ function BackActions({ S, allowAbort }: { S: GameState; allowAbort?: boolean }) 
 
 const BOT_CHOICES = [1, 2, 3, 4, 5, 6, 7];
 
+const invitedKey = (code: string) => `pf-invited:${code}`;
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 12.5l4.5 4.5L19 7" />
+    </svg>
+  );
+}
+
+/**
+ * Aviso de espera en la sala: puntos animados mientras no llega nadie y un check breve cuando entra alguien.
+ * `aria-live` para que el cambio se anuncie también sin mirar la pantalla.
+ */
+function Waiting({ title, sub, ok }: { title: string; sub?: string; ok?: boolean }) {
+  return (
+    <div className={`waiting${ok ? " ok" : ""}`} role="status" aria-live="polite">
+      {ok ? (
+        <span className="waiting-icon">
+          <CheckIcon />
+        </span>
+      ) : (
+        <div className="loading" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </div>
+      )}
+      <div className="waiting-text">
+        <b>{title}</b>
+        {sub ? <span>{sub}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 function Join({ S }: { S: GameState }) {
   const invited = !!roomCodeFromUrl();
   const busy = S.phase !== "lobby" && S.phase !== "none";
@@ -289,6 +325,51 @@ function Lobby({ S }: { S: GameState }) {
   const canStart = total >= (S.minPlayers ?? 2) && total <= (S.maxPlayers ?? 8);
   const maxBots = Math.max(0, (S.maxPlayers ?? 8) - humans);
 
+  // Se recuerda por sala que ya se envió la invitación, para que la espera sobreviva a una recarga.
+  const [invited, setInvited] = useState(() => {
+    try {
+      return typeof window !== "undefined" && window.sessionStorage.getItem(invitedKey(S.roomCode)) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const markInvited = () => {
+    setInvited(true);
+    try {
+      window.sessionStorage.setItem(invitedKey(S.roomCode), "1");
+    } catch {
+      /* almacenamiento no disponible */
+    }
+  };
+
+  // Detecta la entrada de otros humanos comparando asientos entre estados consecutivos.
+  const [arrived, setArrived] = useState("");
+  const humanKey = S.players
+    .filter((p) => p.profile === "humano")
+    .map((p) => `${p.seat}:${p.name}`)
+    .join("|");
+  const playersRef = useRef(S.players);
+  playersRef.current = S.players;
+  const seenSeats = useRef<Set<number> | null>(null);
+  useEffect(() => {
+    const now = playersRef.current.filter((p) => p.profile === "humano");
+    const seen = seenSeats.current;
+    seenSeats.current = new Set(now.map((p) => p.seat));
+    if (!seen) return;
+    const fresh = now.filter((p) => p.seat !== S.humanSeat && !seen.has(p.seat));
+    if (fresh.length) {
+      setArrived(fresh[fresh.length - 1].name);
+      sfx.fama();
+    }
+  }, [humanKey, S.humanSeat]);
+  useEffect(() => {
+    if (!arrived) return;
+    const t = window.setTimeout(() => setArrived(""), 4000);
+    return () => window.clearTimeout(t);
+  }, [arrived]);
+
+  const waitingFriend = invited && humans <= 1;
+
   useEffect(() => {
     if ((S.bots ?? 0) > 0) setBots(S.bots);
   }, [S.bots]);
@@ -327,10 +408,12 @@ function Lobby({ S }: { S: GameState }) {
       <p className="lead">
         Todos descifráis el <b>mismo código</b>.{" "}
         {humans <= 1
-          ? "Estás solo: añade bots o invita a un amigo y espera a que entre."
+          ? waitingFriend
+            ? "Invitación enviada. En cuanto tu amigo abra el enlace aparecerá aquí."
+            : "Estás solo: añade bots o invita a un amigo y espera a que entre."
           : S.isHost
             ? "Eres el anfitrión. Cuando estéis listos, empieza."
-            : "Esperando a que el anfitrión empiece…"}
+            : "El anfitrión configura la mesa y da la salida."}
       </p>
       <div className="seats">
         {S.players.map((p) => (
@@ -340,8 +423,20 @@ function Lobby({ S }: { S: GameState }) {
             {p.profile !== "humano" ? " · bot" : ""}
           </span>
         ))}
+        {waitingFriend ? (
+          <span className="seat empty" aria-hidden="true">
+            Esperando…
+          </span>
+        ) : null}
       </div>
-      <ShareInvite code={S.roomCode} />
+      <ShareInvite code={S.roomCode} onInvite={markInvited} />
+      {arrived ? (
+        <Waiting ok title={`${arrived} ha entrado en la sala`} sub={S.isHost ? "Ya podéis empezar cuando queráis." : undefined} />
+      ) : waitingFriend ? (
+        <Waiting title="Esperando a que entre tu amigo…" sub="Mantén esta pantalla abierta: la sala se actualiza sola cuando alguien se conecta." />
+      ) : !S.isHost ? (
+        <Waiting title="Esperando al anfitrión…" sub="La partida empezará cuando el anfitrión pulse empezar." />
+      ) : null}
       {S.isHost ? (
         <>
           <div className="opts">
