@@ -42,7 +42,7 @@ function LinkIcon() {
  * Invitar a la sala: WhatsApp y Telegram abren un mensaje listo con el código y el enlace,
  * "Compartir…" usa la hoja del sistema (donde exista) y siempre queda copiar el enlace o el código a mano.
  */
-export function ShareInvite({ code, compact }: { code: string; compact?: boolean }) {
+export function ShareInvite({ code, compact, onInvite }: { code: string; compact?: boolean; onInvite?: () => void }) {
   const [fb, setFb] = useState<Feedback>(null);
   const [native, setNative] = useState(false);
 
@@ -56,26 +56,32 @@ export function ShareInvite({ code, compact }: { code: string; compact?: boolean
   }, [fb]);
 
   const text = inviteText(code);
+  const sent = () => onInvite?.();
 
   const copyLink = async () => {
     await copyText(shareUrl(code));
     setFb("link");
+    sent();
   };
   const copyCode = async () => {
     await copyText(code);
     setFb("code");
+    sent();
   };
   const share = async () => {
-    if (await nativeShare(code)) setFb("shared");
+    if (await nativeShare(code)) {
+      setFb("shared");
+      sent();
+    }
   };
 
   return (
     <div className={`share${compact ? " compact" : ""}`} aria-label="Invitar jugadores">
-      <a className="share-btn wa" href={whatsappUrl(text)} target="_blank" rel="noopener noreferrer">
+      <a className="share-btn wa" href={whatsappUrl(text)} target="_blank" rel="noopener noreferrer" onClick={sent}>
         <WhatsAppIcon />
         WhatsApp
       </a>
-      <a className="share-btn tg" href={telegramUrl(code)} target="_blank" rel="noopener noreferrer">
+      <a className="share-btn tg" href={telegramUrl(code)} target="_blank" rel="noopener noreferrer" onClick={sent}>
         <TelegramIcon />
         Telegram
       </a>
