@@ -36,8 +36,11 @@ const PlayerCard = memo(function PlayerCard({
   S: GameState;
 }) {
   const isTurn = S.turnPlayer === p.seat && S.phase === "playing";
+  // "live": sigue en la ronda (ni resuelto ni inactivo). Enciende el LED de su color en el canto.
+  const isLive = S.phase === "playing" && !p.inactive && !p.solved;
   const cls = [
     "player",
+    isLive ? "live" : "",
     p.seat === S.humanSeat ? "me" : "",
     S.alertPlayer === p.seat ? "alert" : "",
     p.solved ? "solved" : "",

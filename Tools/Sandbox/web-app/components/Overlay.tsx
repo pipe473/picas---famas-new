@@ -23,7 +23,7 @@ const Countdown = memo(function Countdown({ S }: { S: GameState }) {
   return (
     <>
       <h3>
-        Ronda {S.round} de {S.rounds}
+        Ronda <span className="num">{S.round}</span> de <span className="num">{S.rounds}</span>
       </h3>
       {/* La key reinicia la animación de entrada con cada número. */}
       <div className="count" key={k} aria-live="assertive">
@@ -54,7 +54,9 @@ const Summary = memo(function Summary({ S }: { S: GameState }) {
     ));
   return (
     <>
-      <h3>Ronda {S.round} · el código era</h3>
+      <h3>
+        Ronda <span className="num">{S.round}</span> · el código era
+      </h3>
       <div className="code">
         {(S.secret ?? "").split(" ").map((d, i) => (
           <div className="tile" key={i}>
@@ -296,8 +298,9 @@ function Lobby({ S }: { S: GameState }) {
   return (
     <>
       <h3>Sala {S.roomCode}</h3>
-      <div className="big">
-        {total} <span style={{ color: "var(--muted)" }}>/ {S.maxPlayers ?? 8}</span>
+      <div className="big" aria-label={`${total} de ${S.maxPlayers ?? 8} jugadores`}>
+        {total}
+        <small>/ {S.maxPlayers ?? 8}</small>
       </div>
       <p className="lead">
         Todos descifráis el <b>mismo código</b>.{" "}
