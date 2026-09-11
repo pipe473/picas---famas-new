@@ -1,4 +1,4 @@
-import type { ApiResult, GameState } from "./types";
+import type { ApiResult, GameState, RankingResponse } from "./types";
 
 // En `next dev` apunta al sandbox C++. El export estático se sirve en el mismo origen.
 export const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
@@ -45,6 +45,13 @@ export const suspect = (seq: number) => api(`/api/suspect?seq=${seq}`);
 export const leaveRoom = () => api("/api/leave");
 export const abortMatch = () => api("/api/abort");
 export const resetRoom = () => api("/api/reset");
+
+/** Top del ranking individual global; con `id` devuelve además esa partida con su puesto aunque quede fuera del top. */
+export function fetchRanking(limit = 10, id = 0) {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (id) q.set("id", String(id));
+  return api<RankingResponse>(`/api/ranking?${q.toString()}`, { skipToken: true });
+}
 
 export function clearInviteUrl() {
   if (typeof window === "undefined") return;

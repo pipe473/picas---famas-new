@@ -871,6 +871,90 @@ main.spectator .events { max-height: none; flex: 1; }
 .legend { display: flex; gap: 6px 16px; font-size: var(--fs-xs); color: var(--muted); margin-top: 10px; align-items: center; flex-wrap: wrap; }
 .legend .lg { display: inline-flex; align-items: center; gap: 6px; }
 
+/* ---------- Rankings: individual (global, persistente) y clasificación de la sala (acumulada) ---------- */
+.rank-block { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line-soft); text-align: center; }
+.rank-head { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0 0 6px; }
+.rank-head .icon { width: 16px; height: 16px; color: var(--gold); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--gold) 60%, transparent)); }
+.rank-head h4 {
+  margin: 0; font-size: var(--fs-2xs); font-weight: 700; line-height: 1.3;
+  letter-spacing: var(--track-eyebrow); text-transform: uppercase; color: var(--muted);
+}
+.rank-head small { font-size: var(--fs-2xs); color: var(--muted); padding-left: 8px; border-left: 1px solid var(--line-soft); line-height: 1.3; }
+.card .rank-note { margin: 0 auto 4px; max-width: 46ch; font-size: var(--fs-xs); text-wrap: pretty; }
+.card .rank-table { width: 100%; margin: 8px 0 0; border-collapse: separate; border-spacing: 0; }
+.rank-table th {
+  padding: 4px 10px 6px; text-align: left; font-size: 10px; font-weight: 700; letter-spacing: var(--track-caps);
+  text-transform: uppercase; color: var(--muted); white-space: nowrap;
+}
+.card .rank-table td { padding: 7px 10px; text-align: left; font-size: var(--fs-md); border-top: 1px solid var(--line-soft); vertical-align: middle; }
+.rank-table th.n, .card .rank-table td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.card .rank-table td.pts { font-weight: 800; color: var(--text); }
+.card .rank-table td.muted { color: var(--muted); font-size: var(--fs-sm); }
+.card .rank-table td.who { font-weight: 700; color: var(--text); letter-spacing: var(--track-tight); overflow-wrap: anywhere; }
+.card .rank-table td.who.tone { color: var(--tone, var(--text)); }
+.rank-table td.who small { display: block; font-weight: 500; font-size: var(--fs-2xs); color: var(--muted); letter-spacing: 0; margin-top: 1px; }
+.rank-table tr.me td { background: var(--player-me); }
+.rank-table tr.me td:first-child { border-radius: var(--r-sm) 0 0 var(--r-sm); box-shadow: inset 3px 0 0 var(--fama); }
+.rank-table tr.me td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.rank-table tr.gone td { opacity: .6; }
+.rank-pos {
+  display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--badge-grey); color: var(--muted); font-size: var(--fs-xs); font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.rank-pos.top.t1 { background: var(--gold); color: var(--badge-gold-fg); box-shadow: 0 0 14px var(--glow-solved); }
+.rank-pos.top.t2 { background: #c3cbdc; color: #1a2238; }
+.rank-pos.top.t3 { background: #d29b6a; color: #2b1a0a; }
+.card .rank-you { margin: 2px 0 6px; color: var(--muted); font-size: var(--fs-sm); }
+.card .rank-you b { color: var(--gold); font-size: var(--fs-xl); font-weight: 800; font-variant-numeric: tabular-nums; vertical-align: -2px; margin: 0 2px; }
+.rank-empty {
+  margin: 8px auto 0; padding: 14px 16px; max-width: 46ch; border: 1px dashed var(--line-soft); border-radius: var(--r-md);
+  color: var(--muted); font-size: var(--fs-sm); line-height: 1.45; text-wrap: pretty;
+}
+.rank-empty b { color: var(--text); font-weight: 600; }
+/* Pestañas Individual / Sala: mismo lenguaje que el control segmentado del inicio. */
+.rank-tabs {
+  display: inline-flex; gap: 4px; padding: 4px; margin: 4px auto 10px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--line-soft);
+}
+.rank-tabs button {
+  display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--muted); font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.rank-tabs button:hover { color: var(--text); }
+.rank-tabs button.on { background: var(--panel); color: var(--text); box-shadow: var(--shadow-sm); }
+.rank-count {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--r-pill);
+  background: var(--gold); color: var(--badge-gold-fg); font-size: 10px; font-weight: 800;
+}
+/* Desplegable del inicio: un enlace discreto con chevrón que gira al abrir. */
+.rank-toggle {
+  display: inline-flex; align-items: center; gap: 8px; margin: 0 auto; padding: 8px 14px; border: 0; border-radius: var(--r-pill);
+  background: transparent; color: var(--muted); font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+  transition: color var(--dur-fast), background var(--dur-fast);
+}
+.rank-toggle:hover { color: var(--text); background: var(--surface-hover); }
+.rank-toggle .icon { width: 15px; height: 15px; color: var(--gold); }
+.rank-toggle .chev { width: 14px; height: 14px; transition: transform var(--dur-base) var(--ease-out); }
+.rank-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.rank-block.open #home-rank { animation: pop-in var(--dur-base) var(--ease-out); }
+/* Diálogo desde el menú: por encima de cabecera, menú y dock de sonido. */
+.overlay.rank-overlay { z-index: 40; }
+.card.rank-card { max-width: 600px; padding-top: 30px; }
+.rank-close {
+  position: absolute; top: 12px; right: 12px; width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--muted); cursor: pointer; display: grid; place-items: center;
+  transition: color var(--dur-fast), border-color var(--dur-fast);
+}
+.rank-close:hover { color: var(--text); border-color: var(--header-btn-hover); }
+.rank-close svg { width: 16px; height: 16px; }
+/* Victorias de sala junto al nombre en la tarjeta del jugador. */
+.player .wins {
+  display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; color: var(--gold);
+  font-size: var(--fs-xs); font-weight: 800; font-variant-numeric: tabular-nums; vertical-align: 1px;
+}
+.player .wins .icon { width: 12px; height: 12px; }
+
 /* ---------- Toasts ---------- */
 /* Toasts de evento: banners que entran desde el lateral derecho, con gradiente por tipo. */
 .toasts {
@@ -1088,6 +1172,10 @@ header .sound-btn.on { color: var(--fama); border-color: var(--fama); }
   .cta .btn { width: 100%; }
   .card .opts { gap: 8px 12px; }
   .card td { padding: 5px 8px; font-size: var(--fs-md); }
+  .rank-table .opt { display: none; }
+  .card .rank-table td, .rank-table th { padding: 6px 6px; }
+  .card .rank-table td { font-size: var(--fs-sm); }
+  .rank-tabs button { padding: 0 10px; font-size: var(--fs-xs); }
   .podium { gap: 8px; }
   .pod { width: 30%; max-width: 110px; font-size: var(--fs-md); }
   .pod.p1 { height: 140px; }

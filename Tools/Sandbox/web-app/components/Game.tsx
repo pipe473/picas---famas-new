@@ -7,6 +7,7 @@ import { Controls } from "@/components/Controls";
 import { Header } from "@/components/Header";
 import { Overlay } from "@/components/Overlay";
 import { PlayerList } from "@/components/PlayerList";
+import { RankingDialog } from "@/components/Ranking";
 import { SoundDock } from "@/components/SoundDock";
 import { Toasts } from "@/components/Toasts";
 import { fetchState, getToken, startMatch, streamUrl, suspect } from "@/lib/api";
@@ -17,6 +18,9 @@ import type { GameState, ToastItem } from "@/lib/types";
 export default function Game() {
   const [S, setS] = useState<GameState | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [rankOpen, setRankOpen] = useState(false);
+  const openRank = useCallback(() => setRankOpen(true), []);
+  const closeRank = useCallback(() => setRankOpen(false), []);
   const knownEv = useRef(new Set<number>());
   const first = useRef(true);
   const toastId = useRef(0);
@@ -134,7 +138,7 @@ export default function Game() {
 
   return (
     <>
-      <Header S={S} />
+      <Header S={S} onRanking={openRank} />
       <AlertBar S={S} />
       <main className={S.humanSeat < 0 || !S.joined ? "spectator" : ""}>
         <PlayerList S={S} />
@@ -143,6 +147,7 @@ export default function Game() {
       </main>
       <Toasts items={toasts} />
       <Overlay S={S} />
+      {rankOpen ? <RankingDialog S={S} onClose={closeRank} /> : null}
       <SoundDock />
     </>
   );

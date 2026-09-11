@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { Dots } from "@/components/Dots";
-import { CrownIcon, LockIcon, MaskIcon } from "@/components/Icons";
+import { CrownIcon, LockIcon, MaskIcon, TrophyIcon } from "@/components/Icons";
 import { useNow } from "@/lib/clock";
 import { COLORS, type GameState, type Player } from "@/lib/types";
 
@@ -37,10 +37,12 @@ const PlayerCard = memo(function PlayerCard({
   p,
   S,
   leader,
+  wins,
 }: {
   p: Player;
   S: GameState;
   leader: boolean;
+  wins: number;
 }) {
   const isTurn = S.turnPlayer === p.seat && S.phase === "playing";
   // "live": sigue en la ronda (ni resuelto ni inactivo). Enciende el LED de su color en el canto.
@@ -82,6 +84,12 @@ const PlayerCard = memo(function PlayerCard({
             {leader ? (
               <span className="crown" title="Líder de la partida">
                 <CrownIcon />
+              </span>
+            ) : null}
+            {wins > 0 ? (
+              <span className="wins" title={`${wins} ${wins === 1 ? "partida ganada" : "partidas ganadas"} en esta sala`}>
+                <TrophyIcon />
+                {wins}
               </span>
             ) : null}
           </span>
@@ -126,12 +134,14 @@ export const PlayerList = memo(function PlayerList({ S }: { S: GameState }) {
   const top = Math.max(0, ...S.players.map((p) => p.matchScore));
   const leaders = S.players.filter((p) => p.matchScore === top && top > 0);
   const leaderSeat = leaders.length === 1 ? leaders[0].seat : -1;
+  // Victorias acumuladas en la sala (solo humanos, por nombre): pequeño trofeo junto al nombre.
+  const winsByName = new Map((S.roomRanking ?? []).map((r) => [r.name, r.wins]));
   return (
     <section className="panel">
       <h2>Jugadores</h2>
       <div className="players">
         {S.players.map((p) => (
-          <PlayerCard key={p.seat} p={p} S={S} leader={p.seat === leaderSeat} />
+          <PlayerCard key={p.seat} p={p} S={S} leader={p.seat === leaderSeat} wins={p.profile === "humano" ? (winsByName.get(p.name) ?? 0) : 0} />
         ))}
       </div>
       <div className="legend">

@@ -38,6 +38,35 @@ export type BoardEntry = {
 export type PrivateEntry = { seq: number; guess: string; f: number; p: number };
 export type LogEvent = { id: number; text: string };
 
+/** Fila de la clasificación de la sala: acumulada entre partidas con amigos, por nombre. `seat` = -1 si ya no está. */
+export type RoomStanding = {
+  pos: number;
+  name: string;
+  seat: number;
+  matches: number;
+  wins: number;
+  podiums: number;
+  points: number;
+  best: number;
+  roundsWon: number;
+  lastRank: number;
+};
+
+/** Partida del ranking individual global (contra bots). `ts` en segundos Unix. */
+export type SoloEntry = {
+  pos: number;
+  id: number;
+  name: string;
+  score: number;
+  bots: number;
+  pace: string;
+  turns: string;
+  rounds: number;
+  roundsWon: number;
+  len: number;
+  ts: number;
+};
+
 export type GameState = {
   phase: Phase;
   round: number;
@@ -69,9 +98,16 @@ export type GameState = {
   entries: BoardEntry[];
   private: PrivateEntry[];
   events: LogEvent[];
+  /** La última partida fue individual (1 humano + bots) y se registró en el ranking global. */
+  solo: boolean;
+  soloRank: number;
+  soloId: number;
+  roomMatches: number;
+  roomRanking: RoomStanding[];
 };
 
 export type ApiResult = { ok: boolean; error?: string };
+export type RankingResponse = ApiResult & { total: number; solo: SoloEntry[]; mine: SoloEntry | null };
 export type ToastItem = { id: number; text: string; cls?: string; leaving?: boolean };
 
 export const COLORS = [
