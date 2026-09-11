@@ -79,11 +79,12 @@ export function joinRoom(name: string, code?: string) {
   return api<JoinResult>(`/api/join?${q.toString()}`);
 }
 
+/** `attempt`: segundos por intento; 0 = tiempo libre (el servidor lo recibe como "free"). */
 export function configRoom(opts: { bots?: number; pace?: string; attempt?: number; turns?: string }) {
   const q = new URLSearchParams();
   if (opts.bots !== undefined) q.set("bots", String(opts.bots));
   if (opts.pace) q.set("pace", opts.pace);
-  if (opts.attempt !== undefined) q.set("attempt", String(opts.attempt));
+  if (opts.attempt !== undefined) q.set("attempt", opts.attempt > 0 ? String(opts.attempt) : "free");
   if (opts.turns) q.set("turns", opts.turns);
   return api(`/api/config?${q.toString()}`);
 }

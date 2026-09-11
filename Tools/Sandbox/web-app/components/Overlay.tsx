@@ -318,8 +318,10 @@ function Lobby({ S }: { S: GameState }) {
   const humans = S.players.filter((p) => p.profile === "humano").length;
   const [bots, setBots] = useState(S.bots > 0 ? S.bots : humans <= 1 ? 3 : 0);
   const [pace, setPace] = useState<Pace>(S.pace || "slow");
-  const [attempt, setAttempt] = useState(S.attemptSeconds || 10);
+  // 0 = tiempo libre (sin reloj). Si el servidor aún no lo dice, 10 s.
+  const [attempt, setAttempt] = useState(S.freeTime ? 0 : S.attemptSeconds || 10);
   const [turns, setTurns] = useState<TurnMode>(S.turnMode || "simultaneous");
+  const freeTime = attempt === 0;
   const [err, setErr] = useState("");
   const total = humans + bots;
   const canStart = total >= (S.minPlayers ?? 2) && total <= (S.maxPlayers ?? 8);
@@ -483,10 +485,12 @@ function Lobby({ S }: { S: GameState }) {
                 }}
               >
                 {[10, 15, 20, 30].map((a) => (
-                  <option key={a}>{a}</option>
+                  <option key={a} value={a}>
+                    {a} s/intento
+                  </option>
                 ))}
+                <option value={0}>Libre (sin reloj)</option>
               </select>
-              s/intento
             </label>
             <label>
               Turnos
@@ -504,6 +508,13 @@ function Lobby({ S }: { S: GameState }) {
               </select>
             </label>
           </div>
+          {freeTime ? (
+            <p className="opts-hint">
+              Tiempo libre: nadie tiene reloj, cada cual tira cuando quiere
+              {turns !== "simultaneous" ? " y el turno dura hasta que su dueño envía" : ""}. La ronda solo acaba por acierto y la
+              alerta de {S.len - 1} Famas no lanza cuenta atrás.
+            </p>
+          ) : null}
           {err ? (
             <div className="form-err" role="alert">
               {err}

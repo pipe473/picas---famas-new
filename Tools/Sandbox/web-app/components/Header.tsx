@@ -94,6 +94,11 @@ const Status = memo(function Status({ S }: { S: GameState }) {
               Sala <b>{S.roomCode}</b>
             </span>
           ) : null}
+          {S.freeTime && S.phase !== "lobby" ? (
+            <span title="Sin reloj de intento: cada cual tira cuando quiere">
+              Tiempo <b>libre</b>
+            </span>
+          ) : null}
           <TurnInfo S={S} />
         </div>
       </div>
