@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -33,6 +34,7 @@
 
 #include <poll.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "Core/PFCodeMath.h"
@@ -760,6 +762,110 @@ static std::string SanitizeName(std::string S)
 	return O.empty() ? "Jugador" : O;
 }
 
+// ------------------------------------------------------------------------------------------------
+// Ranking individual: mejores partidas contra bots. Global (compartido por todas las salas) y
+// persistente en un TSV dentro del directorio de datos (PF_DATA_DIR o <binario>/data).
+// ------------------------------------------------------------------------------------------------
+
+struct FSoloEntry
+{
+	int Id = 0; int64_t Ts = 0; std::string Name; int Score = 0; int Bots = 0;
+	std::string Pace, Turns; int Rounds = 0, RoundsWon = 0, Len = 4;
+};
+
+struct FSoloRanking
+{
+	static constexpr int kKeep = 100;
+	std::vector<FSoloEntry> Entries;   // mas puntos primero; a igualdad, la mas antigua
+	std::string Path;
+	int NextId = 1;
+
+	static bool Better(const FSoloEntry& A, const FSoloEntry& B) { return A.Score != B.Score ? A.Score > B.Score : A.Ts < B.Ts; }
+
+	void Load(const std::string& InPath)
+	{
+		Path = InPath; Entries.clear(); NextId = 1;
+		std::stringstream SS(ReadFile(Path)); std::string Line;
+		while (std::getline(SS, Line))
+		{
+			if (Line.empty() || Line[0] == '#') continue;
+			std::vector<std::string> F; std::stringstream LS(Line); std::string Tok;
+			while (std::getline(LS, Tok, '\t')) F.push_back(Tok);
+			if (F.size() < 10) continue;
+			FSoloEntry E;
+			E.Id = std::atoi(F[0].c_str()); E.Ts = std::strtoll(F[1].c_str(), nullptr, 10); E.Name = SanitizeName(F[2]);
+			E.Score = std::atoi(F[3].c_str()); E.Bots = std::atoi(F[4].c_str()); E.Pace = F[5]; E.Turns = F[6];
+			E.Rounds = std::atoi(F[7].c_str()); E.RoundsWon = std::atoi(F[8].c_str()); E.Len = std::atoi(F[9].c_str());
+			Entries.push_back(E);
+			NextId = std::max(NextId, E.Id + 1);
+		}
+		std::stable_sort(Entries.begin(), Entries.end(), Better);
+		if ((int)Entries.size() > kKeep) Entries.resize(kKeep);
+	}
+
+	void Save() const
+	{
+		if (Path.empty()) return;
+		std::string Out = "# pf-solo-ranking v1: id ts name score bots pace turns rounds roundsWon len\n";
+		for (const FSoloEntry& E : Entries)
+		{
+			Out += std::to_string(E.Id) + '\t' + std::to_string((long long)E.Ts) + '\t' + E.Name + '\t' + std::to_string(E.Score) + '\t' +
+				std::to_string(E.Bots) + '\t' + E.Pace + '\t' + E.Turns + '\t' + std::to_string(E.Rounds) + '\t' +
+				std::to_string(E.RoundsWon) + '\t' + std::to_string(E.Len) + '\n';
+		}
+		const std::string Tmp = Path + ".tmp";
+		FILE* F = std::fopen(Tmp.c_str(), "wb");
+		if (!F) { std::fprintf(stderr, "ranking: no puedo escribir %s\n", Tmp.c_str()); return; }
+		std::fwrite(Out.data(), 1, Out.size(), F);
+		std::fclose(F);
+		std::rename(Tmp.c_str(), Path.c_str());
+	}
+
+	// Inserta la partida y devuelve su puesto (1 = mejor), o 0 si no entra entre las kKeep mejores.
+	int Add(FSoloEntry E)
+	{
+		E.Id = NextId++;
+		if (!E.Ts) E.Ts = (int64_t)std::time(nullptr);
+		auto It = std::upper_bound(Entries.begin(), Entries.end(), E, Better);
+		const int Rank = int(It - Entries.begin()) + 1;
+		if (Rank > kKeep) return 0;
+		Entries.insert(It, E);
+		if ((int)Entries.size() > kKeep) Entries.resize(kKeep);
+		Save();
+		return Rank;
+	}
+
+	int IdAt(int Rank) const { return Rank >= 1 && Rank <= (int)Entries.size() ? Entries[size_t(Rank - 1)].Id : 0; }
+
+	static std::string EntryJson(const FSoloEntry& E, int Pos)
+	{
+		char Buf[384];
+		std::snprintf(Buf, sizeof Buf, "{\"pos\":%d,\"id\":%d,\"name\":%s,\"score\":%d,\"bots\":%d,\"pace\":%s,\"turns\":%s,\"rounds\":%d,\"roundsWon\":%d,\"len\":%d,\"ts\":%lld}",
+			Pos, E.Id, JsonStr(E.Name).c_str(), E.Score, E.Bots, JsonStr(E.Pace).c_str(), JsonStr(E.Turns).c_str(), E.Rounds, E.RoundsWon, E.Len, (long long)E.Ts);
+		return Buf;
+	}
+
+	// GET /api/ranking?limit=N&id=I  ->  top N y, si I existe, esa entrada con su puesto (para resaltar "tu partida").
+	std::string ApiJson(const std::map<std::string, std::string>& Q) const
+	{
+		int Limit = Q.count("limit") ? std::atoi(Q.at("limit").c_str()) : 10;
+		Limit = std::max(1, std::min(kKeep, Limit));
+		const int WantId = Q.count("id") ? std::atoi(Q.at("id").c_str()) : 0;
+		std::string J = "{\"ok\":true,\"total\":" + std::to_string(Entries.size()) + ",\"solo\":[";
+		std::string Mine = "null";
+		for (size_t i = 0; i < Entries.size(); ++i)
+		{
+			const std::string Item = EntryJson(Entries[i], int(i) + 1);
+			if ((int)i < Limit) J += (i ? "," : "") + Item;
+			if (WantId && Entries[i].Id == WantId) Mine = Item;
+		}
+		J += "],\"mine\":" + Mine + "}";
+		return J;
+	}
+};
+
+static FSoloRanking gSoloRanking;
+
 struct FWebSession
 {
 	enum class EPhase { Lobby, Countdown, Playing, Summary, MatchEnd };
@@ -781,6 +887,15 @@ struct FWebSession
 	std::string PaceName = "slow";
 	double SessionAttempt = 0;
 	ETurnMode SessionTurns = ETurnMode::Simultaneous;
+
+	// Clasificacion de la sala: acumulada entre partidas con amigos (>= 2 humanos), por nombre. Solo humanos.
+	struct FStanding { std::string Name; int Matches = 0, Wins = 0, Podiums = 0, Points = 0, Best = 0, RoundsWon = 0, LastRank = 0; };
+	std::vector<FStanding> Standings;
+	int RoomMatches = 0;            // partidas con amigos terminadas en esta sala
+	int HumansAtStart = 0;          // humanos sentados al empezar la partida en curso
+	int RoundWinners[9] = {};       // asiento ganador de cada ronda de la partida en curso (-1 = nadie)
+	// Resultado de la ultima partida individual (1 humano + bots) en el ranking global.
+	bool bLastSolo = false; int LastSoloRank = 0, LastSoloId = 0;
 
 	void ApplyGlobals() const
 	{
@@ -824,6 +939,103 @@ struct FWebSession
 		RoundIndex = 0;
 		RoundsPlayed = 0;
 		for (int i = 0; i < kMaxPlayers; ++i) MatchScore[i] = 0;
+		Standings.clear();
+		RoomMatches = 0;
+		bLastSolo = false; LastSoloRank = 0; LastSoloId = 0;
+	}
+
+	// Dos amigos con el mismo nombre se fundirian en la clasificacion: al segundo se le anade un sufijo.
+	std::string UniqueName(const std::string& Base) const
+	{
+		auto Taken = [&](const std::string& N) { for (const auto& C : Clients) if (C.Name == N) return true; return false; };
+		if (!Taken(Base)) return Base;
+		const std::string Stem = Base.size() > 13 ? Base.substr(0, 13) : Base;
+		for (int K = 2; K < 100; ++K)
+		{
+			const std::string N = Stem + " " + std::to_string(K);
+			if (!Taken(N)) return N;
+		}
+		return Base;
+	}
+
+	FStanding& FindOrAddStanding(const std::string& Name)
+	{
+		for (auto& S : Standings) if (S.Name == Name) return S;
+		Standings.push_back(FStanding{});
+		Standings.back().Name = Name;
+		return Standings.back();
+	}
+
+	// Al terminar la partida: 1 humano + bots -> ranking individual global; >= 2 humanos -> clasificacion de la sala.
+	void RecordMatch()
+	{
+		if (!T) return;
+		const int N = T->NumPlayers;
+		auto RankOf = [&](int Seat) { int R = 1; for (int j = 0; j < N; ++j) if (MatchScore[j] > MatchScore[Seat]) ++R; return R; };
+		auto RoundsWonBy = [&](int Seat) { int W = 0; for (int r = 0; r < NumRounds && r < 9; ++r) if (RoundWinners[r] == Seat) ++W; return W; };
+
+		if (HumansAtStart == 1 && N >= 2)
+		{
+			for (int i = 0; i < N; ++i)
+			{
+				if (T->Profiles[i] != EProfile::Human) continue;
+				FSoloEntry E;
+				E.Name = WebNames[i]; E.Score = MatchScore[i]; E.Bots = N - 1; E.Pace = PaceName; E.Turns = TurnModeName(SessionTurns);
+				E.Rounds = NumRounds; E.RoundsWon = RoundsWonBy(i); E.Len = T->Config.CodeLength;
+				LastSoloRank = gSoloRanking.Add(E);
+				LastSoloId = gSoloRanking.IdAt(LastSoloRank);
+				bLastSolo = true;
+			}
+			return;
+		}
+		if (HumansAtStart < 2) return;
+
+		RoomMatches++;
+		for (int i = 0; i < N; ++i)
+		{
+			if (T->Profiles[i] != EProfile::Human) continue;
+			FStanding& S = FindOrAddStanding(WebNames[i]);
+			const int R = RankOf(i);
+			S.Matches++; S.Points += MatchScore[i]; S.Best = S.Matches == 1 ? MatchScore[i] : std::max(S.Best, MatchScore[i]);
+			if (R == 1) S.Wins++;
+			if (R <= 3) S.Podiums++;
+			S.RoundsWon += RoundsWonBy(i);
+			S.LastRank = R;
+		}
+		std::stable_sort(Standings.begin(), Standings.end(), [](const FStanding& A, const FStanding& B)
+		{
+			if (A.Wins != B.Wins) return A.Wins > B.Wins;
+			if (A.Points != B.Points) return A.Points > B.Points;
+			if (A.Matches != B.Matches) return A.Matches < B.Matches;
+			return A.Name < B.Name;
+		});
+	}
+
+	// Asiento actual del jugador con ese nombre (para colorearlo en la UI), o -1 si ya no esta en la sala.
+	int SeatOfName(const std::string& Name) const
+	{
+		for (size_t i = 0; i < Clients.size(); ++i)
+		{
+			if (Clients[i].Name != Name) continue;
+			if (Phase == EPhase::Lobby || !T) return int(i);
+			return Clients[i].Seat;
+		}
+		return -1;
+	}
+
+	void AppendRanking(std::string& J) const
+	{
+		J += "\"solo\":" + std::string(bLastSolo ? "true" : "false") + ",\"soloRank\":" + std::to_string(LastSoloRank) + ",\"soloId\":" + std::to_string(LastSoloId) + ",";
+		J += "\"roomMatches\":" + std::to_string(RoomMatches) + ",\"roomRanking\":[";
+		char Buf[320];
+		for (size_t i = 0; i < Standings.size(); ++i)
+		{
+			const FStanding& S = Standings[i];
+			std::snprintf(Buf, sizeof Buf, "%s{\"pos\":%d,\"name\":%s,\"seat\":%d,\"matches\":%d,\"wins\":%d,\"podiums\":%d,\"points\":%d,\"best\":%d,\"roundsWon\":%d,\"lastRank\":%d}",
+				i ? "," : "", int(i) + 1, JsonStr(S.Name).c_str(), SeatOfName(S.Name), S.Matches, S.Wins, S.Podiums, S.Points, S.Best, S.RoundsWon, S.LastRank);
+			J += Buf;
+		}
+		J += "],";
 	}
 
 	bool AllHumansInactive() const
@@ -872,6 +1084,9 @@ struct FWebSession
 		for (int i = 0; i < kMaxPlayers; ++i) MatchScore[i] = 0;
 		RoundIndex = 0;
 		RoundsPlayed = 0;
+		HumansAtStart = int(Clients.size());
+		for (int& W : RoundWinners) W = -1;
+		bLastSolo = false; LastSoloRank = 0; LastSoloId = 0;
 	}
 
 	void BeginCountdown(double Now) { Phase = EPhase::Countdown; PhaseEnd = Now + 3.0; }
@@ -902,6 +1117,7 @@ struct FWebSession
 			{
 				LastRound = T->Round; RoundsPlayed++;
 				for (int i = 0; i < T->NumPlayers; ++i) MatchScore[i] += T->Round.RoundScore[i];
+				if (RoundIndex >= 0 && RoundIndex < 9) RoundWinners[RoundIndex] = LastRound.Winner == kNoPlayer ? -1 : (int)LastRound.Winner;
 				Phase = EPhase::Summary; PhaseEnd = Now + 12.0;
 			}
 			break;
@@ -909,7 +1125,7 @@ struct FWebSession
 			if (Now >= PhaseEnd)
 			{
 				if (++RoundIndex < NumRounds) BeginCountdown(Now);
-				else { Phase = EPhase::MatchEnd; PhaseEnd = Now + 15.0; }
+				else { RecordMatch(); Phase = EPhase::MatchEnd; PhaseEnd = Now + 15.0; }
 			}
 			break;
 		default: break;
@@ -934,6 +1150,7 @@ struct FWebSession
 		J += "\"attemptSeconds\":" + std::to_string(int(gAttemptSeconds > 0 ? gAttemptSeconds : FRoundConfig{}.AttemptSeconds)) + ",";
 		J += "\"sdAttemptSeconds\":" + std::to_string(int(FRoundConfig{}.SuddenDeathAttemptSeconds)) + ",";
 		J += "\"turnMode\":" + JsonStr(TurnModeName(gTurnMode)) + ",";
+		AppendRanking(J);
 	}
 
 	std::string StateJson(double Now, const std::string& Token) const
@@ -1046,7 +1263,7 @@ struct FWebSession
 			if (int(Clients.size()) >= kMaxPlayers) return "{\"ok\":false,\"error\":\"sala llena\"}";
 			FClient C;
 			C.Token = RandomToken();
-			C.Name = SanitizeName(Q.count("name") ? Q.at("name") : "");
+			C.Name = UniqueName(SanitizeName(Q.count("name") ? Q.at("name") : ""));
 			C.bHost = Clients.empty();
 			C.Seat = -1;
 			Clients.push_back(C);
@@ -1189,12 +1406,13 @@ static std::string NormCode(std::string S)
 
 static std::string LandingJson(double Now)
 {
-	char Buf[512];
+	char Buf[768];
 	std::snprintf(Buf, sizeof Buf,
 		"{\"phase\":\"none\",\"round\":1,\"rounds\":3,\"len\":4,\"now\":%.3f,\"phaseEnd\":0,\"roundStart\":0,"
 		"\"spectator\":true,\"humanSeat\":-1,\"joined\":false,\"isHost\":false,\"roomCode\":\"\",\"bots\":0,"
 		"\"minPlayers\":%d,\"maxPlayers\":%d,\"pace\":\"slow\",\"attemptSeconds\":10,\"sdAttemptSeconds\":6,"
-		"\"turnMode\":\"simultaneous\",\"turnPlayer\":-1,\"turnNumber\":0,\"turnOrder\":[],\"secret\":null,"
+		"\"turnMode\":\"simultaneous\",\"solo\":false,\"soloRank\":0,\"soloId\":0,\"roomMatches\":0,\"roomRanking\":[],"
+		"\"turnPlayer\":-1,\"turnNumber\":0,\"turnOrder\":[],\"secret\":null,"
 		"\"winner\":-1,\"alertPlayer\":-1,\"suddenDeathEnd\":0,\"players\":[],\"entries\":[],\"private\":[],\"events\":[]}",
 		Now, kMinPlayers, kMaxPlayers);
 	return Buf;
@@ -1253,6 +1471,7 @@ struct FRoomHub
 	std::string Handle(const std::string& Path, std::map<std::string, std::string> Q, const std::string& Token, double Now)
 	{
 		LastCookie.clear();
+		if (Path == "/api/ranking") return gSoloRanking.ApiJson(Q);
 		if (Q.count("code")) Q["code"] = NormCode(Q["code"]);
 		const bool bHasCode = Q.count("code") && !Q["code"].empty();
 		if (Path == "/api/solo" || Path == "/api/create" || (Path == "/api/join" && !bHasCode))
@@ -1403,6 +1622,7 @@ static int RunServe(int Port, int DefaultBots, const std::string& WebDir)
 	std::vector<FSseClient> Sse;
 	std::printf("Picas y Famas sandbox web: http://127.0.0.1:%d/\n", Port);
 	std::printf("Salas bajo demanda · minimo %d, maximo %d jugadores\n", kMinPlayers, kMaxPlayers);
+	std::printf("Ranking individual: %s (%d partidas)\n", gSoloRanking.Path.c_str(), (int)gSoloRanking.Entries.size());
 	std::printf("Crea sala en el navegador e invita con el enlace. Ctrl+C para parar.\n");
 	std::fflush(stdout);
 
@@ -1491,10 +1711,12 @@ int main(int Argc, char** Argv)
 	bool bQuiet = false;
 	int Port = 8080;
 	bool bPortSet = false;
+	std::string DataDir = std::getenv("PF_DATA_DIR") ? std::getenv("PF_DATA_DIR") : "";
 	std::vector<int> Nums;
 	for (int i = 2; i < Argc; ++i)
 	{
 		if (!std::strcmp(Argv[i], "--seed") && i + 1 < Argc) { Seed = std::strtoull(Argv[++i], nullptr, 10); continue; }
+		if (!std::strcmp(Argv[i], "--data") && i + 1 < Argc) { DataDir = Argv[++i]; continue; }
 		if (!std::strcmp(Argv[i], "--quiet")) { bQuiet = true; continue; }
 		if (!std::strcmp(Argv[i], "--spectator")) { continue; }
 		if (!std::strcmp(Argv[i], "--port") && i + 1 < Argc) { Port = std::atoi(Argv[++i]); bPortSet = true; continue; }
@@ -1520,9 +1742,12 @@ int main(int Argc, char** Argv)
 		if (gReadLatency == 0.0) SetPace("slow");
 		std::string Dir = Argv[0]; const size_t Slash = Dir.find_last_of('/');
 		Dir = Slash == std::string::npos ? "." : Dir.substr(0, Slash);
+		if (DataDir.empty()) DataDir = Dir + "/data";
+		mkdir(DataDir.c_str(), 0755);   // si ya existe (o falla), Save() avisara al escribir
+		gSoloRanking.Load(DataDir + "/ranking_solo.tsv");
 		return RunServe(Port, Nums.size() > 0 ? std::max(0, std::min(6, Nums[0])) : 0, Dir + "/web");
 	}
-	std::printf("uso: pf_sandbox play [bots] [--seed N] | sim [partidas] [jugadores] [--seed N] [--quiet] | serve [bots] [--port P]\n");
+	std::printf("uso: pf_sandbox play [bots] [--seed N] | sim [partidas] [jugadores] [--seed N] [--quiet] | serve [bots] [--port P] [--data DIR]\n");
 	std::printf("     share.sh arranca serve + tunel gratis (Cloudflare) para jugar con amigos\n");
 	return 1;
 }
