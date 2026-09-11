@@ -5,6 +5,7 @@ import { sfx } from "@/lib/audio";
 import { abortMatch, configRoom, createRoom, goHome, joinRoom, roomCodeFromUrl, setToken, startMatch, startSolo } from "@/lib/api";
 import { useNow } from "@/lib/clock";
 import { ShareInvite } from "@/components/ShareInvite";
+import { RankHead, RoomRanking, SoloRanking } from "@/components/Ranking";
 import { TrophyIcon } from "@/components/Icons";
 import { COLORS, type GameState, type Pace, type TurnMode } from "@/lib/types";
 
@@ -136,6 +137,25 @@ const MatchEnd = memo(function MatchEnd({ S, onAgain }: { S: GameState; onAgain:
           </tbody>
         </table>
       ) : null}
+      {S.solo ? (
+        <div className="rank-block">
+          <RankHead>Ranking individual</RankHead>
+          {S.soloRank > 0 ? (
+            <p className="rank-you">
+              Tu partida entra en el puesto <b>#{S.soloRank}</b>
+              {S.soloRank === 1 ? " · ¡récord!" : ""}
+            </p>
+          ) : (
+            <p className="rank-you">Tu partida no entra entre las 100 mejores. La próxima, seguro.</p>
+          )}
+          <SoloRanking limit={5} highlightId={S.soloId} />
+        </div>
+      ) : S.roomRanking.length ? (
+        <div className="rank-block">
+          <RankHead sub={`${S.roomMatches} ${S.roomMatches === 1 ? "partida" : "partidas"}`}>Clasificación de la sala</RankHead>
+          <RoomRanking S={S} />
+        </div>
+      ) : null}
       {S.isHost ? (
         <button type="button" className="btn" onClick={onAgain}>
           Una más
@@ -207,6 +227,7 @@ function Join({ S }: { S: GameState }) {
   const [name, setName] = useState("");
   const [bots, setBots] = useState(3);
   const [err, setErr] = useState("");
+  const [showRank, setShowRank] = useState(false);
 
   const finish = (r: { ok?: boolean; token?: string; error?: string } | null) => {
     if (!r?.ok || !r.token) {
@@ -310,6 +331,23 @@ function Join({ S }: { S: GameState }) {
           </>
         )}
       </div>
+      {!invited ? (
+        <div className={`rank-block${showRank ? " open" : ""}`}>
+          <button type="button" className="rank-toggle" aria-expanded={showRank} aria-controls="home-rank" onClick={() => setShowRank((v) => !v)}>
+            <TrophyIcon />
+            Ranking individual
+            <svg className="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+          {showRank ? (
+            <div id="home-rank">
+              <p className="sub rank-note">Las mejores partidas contra bots. Cada partida cuenta tres rondas.</p>
+              <SoloRanking limit={10} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </>
   );
 }
@@ -438,6 +476,12 @@ function Lobby({ S }: { S: GameState }) {
         <Waiting title="Esperando a que entre tu amigo…" sub="Mantén esta pantalla abierta: la sala se actualiza sola cuando alguien se conecta." />
       ) : !S.isHost ? (
         <Waiting title="Esperando al anfitrión…" sub="La partida empezará cuando el anfitrión pulse empezar." />
+      ) : null}
+      {S.roomRanking.length ? (
+        <div className="rank-block">
+          <RankHead sub={`${S.roomMatches} ${S.roomMatches === 1 ? "partida" : "partidas"}`}>Clasificación de la sala</RankHead>
+          <RoomRanking S={S} />
+        </div>
       ) : null}
       {S.isHost ? (
         <>

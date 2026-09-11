@@ -108,7 +108,7 @@ const Status = memo(function Status({ S }: { S: GameState }) {
 
 type Pending = "abort" | "leave" | null;
 
-function HeaderMenu({ S }: { S: GameState }) {
+function HeaderMenu({ S, onRanking }: { S: GameState; onRanking: () => void }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<Pending>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -179,6 +179,22 @@ function HeaderMenu({ S }: { S: GameState }) {
             </div>
           ) : null}
 
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            onClick={() => {
+              close();
+              onRanking();
+            }}
+          >
+            Ranking
+            <small>
+              Individual
+              {S.roomCode ? ` y clasificación de la sala${S.roomMatches > 0 ? ` · ${S.roomMatches} ${S.roomMatches === 1 ? "partida" : "partidas"}` : ""}` : ""}
+            </small>
+          </button>
+
           {canAbort ? (
             pending === "abort" ? (
               <div className="menu-confirm" role="alertdialog" aria-label="Confirmar terminar partida">
@@ -224,7 +240,7 @@ function HeaderMenu({ S }: { S: GameState }) {
   );
 }
 
-export const Header = memo(function Header({ S }: { S: GameState }) {
+export const Header = memo(function Header({ S, onRanking }: { S: GameState; onRanking: () => void }) {
   return (
     <header>
       <div className="brand">
@@ -237,7 +253,7 @@ export const Header = memo(function Header({ S }: { S: GameState }) {
       <div className="actions">
         <SoundToggle />
         <ThemeToggle />
-        {S.joined ? <HeaderMenu S={S} /> : null}
+        {S.joined ? <HeaderMenu S={S} onRanking={onRanking} /> : null}
       </div>
     </header>
   );
