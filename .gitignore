@@ -29,6 +29,9 @@ Plugins/*/Intermediate/
 /tmp/
 pf_sandbox
 
+# Datos locales del sandbox (ranking individual)
+Tools/Sandbox/data/
+
 # Frontend Next.js del sandbox
 Tools/Sandbox/web-app/node_modules/
 Tools/Sandbox/web-app/.next/
