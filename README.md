@@ -50,24 +50,32 @@ navegador), **Efectos** (solo los pitidos del juego) y **Silencio** (modo descan
 reproductor sigue sonando al plegarlo, ocultarlo o cambiar de fase. No hace falta cuenta de desarrollador ni
 claves: sin sesión en Spotify se oyen 30 s por tema; iniciando sesión desde el propio reproductor, completo.
 
-**Rankings.** Hay dos, uno por modo de juego:
+**Rankings.** Hay tres: uno por modo de juego y un global que suma los dos:
 
-- *Ranking individual* (partidas de **un humano contra bots**): tabla global de las 100 mejores partidas, ordenada por
+- *Ranking individual* (partidas de **un humano contra bots**): tabla de las 100 mejores partidas, ordenada por
   puntos de partida (tres rondas). Cada fila guarda nombre, puntos, número de bots, ritmo, modo de turnos, rondas
-  ganadas y fecha. Se ve desde la pantalla de inicio (desplegable *Ranking individual*), en el menú y al terminar la
+  ganadas y fecha. Se ve desde la pantalla de inicio (desplegable *Rankings*), en el menú y al terminar la
   partida, donde se indica el puesto conseguido. Persiste en `ranking_solo.tsv` dentro del directorio de datos
   (`--data DIR`, variable `PF_DATA_DIR` o, por defecto, `Tools/Sandbox/data/`), así que sobrevive a reinicios del
-  servidor; en Render sin disco persistente se pierde al redesplegar. `GET /api/ranking?limit=N&id=I` lo expone en JSON.
+  servidor; en Render sin disco persistente se pierde al redesplegar.
 - *Clasificación de la sala* (partidas con **dos o más amigos**): acumulada por nombre mientras la sala siga viva,
   partida tras partida con *Una más*. Cuenta victorias (1.º de la mesa, bots incluidos), podios, puntos y partidas;
   ordena por victorias y, a igualdad, por puntos. Aparece al final de cada partida, en la sala de espera, en el menú
   (pestaña *Sala*) y como un pequeño trofeo con el número de victorias junto al nombre de cada jugador. Si dos amigos
   entran con el mismo nombre, al segundo se le añade un sufijo (`Bea 2`) para que no se fundan en la tabla.
+- *Ranking global* (**todas** las partidas, contra bots y con amigos): trayectoria acumulada por nombre de jugador.
+  Suma puntos, victorias, podios, partidas (desglosadas en individuales y con amigos), rondas ganadas y mejor
+  partida; ordena por puntos totales, a igualdad por victorias y después por menos partidas. Se guardan hasta 500
+  jugadores en `ranking_global.tsv`, en el mismo directorio de datos. Tiene su pestaña *Global* en el desplegable de
+  inicio y en el diálogo del menú, y al terminar cada partida se indica el puesto global del jugador.
+
+`GET /api/ranking?limit=N&id=I&name=X` expone los dos rankings persistentes en JSON: `solo` (con `mine` si `id`
+coincide con una partida) y `global` (con `me` si `name` coincide con un jugador).
 
 Comandos en partida: `1234` intento · `e1234` encriptar · `d1234 2 1` señuelo (finge 2F 1P) · `s 12` sospechar de #12 · `q` salir.
 Opciones: `--seed N`, `--pace slow|normal|fast`, `--attempt N|free` (segundos por intento; `free` = **tiempo libre**),
 `--turns simultaneous|seat|random` (por turnos, el cronómetro corre solo para quien tiene el turno; `random` baraja el
-orden en cada ronda), `--decoy-cap N`, `--data DIR` (directorio de datos del ranking en `serve`).
+orden en cada ronda), `--decoy-cap N`, `--data DIR` (directorio de datos de los rankings en `serve`).
 
 **Tiempo libre** (`--attempt free` o `--free`; en el HUD web, *Reloj → Libre (sin reloj)*): nadie tiene reloj de intento,
 cada cual tira cuando quiere y, por turnos, el turno dura hasta que su dueño envía. No hay Pasos por expiración, la ronda

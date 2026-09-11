@@ -884,13 +884,10 @@ struct FSoloRanking
 		return Buf;
 	}
 
-	// GET /api/ranking?limit=N&id=I  ->  top N y, si I existe, esa entrada con su puesto (para resaltar "tu partida").
-	std::string ApiJson(const std::map<std::string, std::string>& Q) const
+	// Parte individual de /api/ranking?limit=N&id=I: top N y, si I existe, esa entrada con su puesto (para resaltar "tu partida").
+	void AppendApi(std::string& J, int Limit, int WantId) const
 	{
-		int Limit = Q.count("limit") ? std::atoi(Q.at("limit").c_str()) : 10;
-		Limit = std::max(1, std::min(kKeep, Limit));
-		const int WantId = Q.count("id") ? std::atoi(Q.at("id").c_str()) : 0;
-		std::string J = "{\"ok\":true,\"total\":" + std::to_string(Entries.size()) + ",\"solo\":[";
+		J += "\"total\":" + std::to_string(Entries.size()) + ",\"solo\":[";
 		std::string Mine = "null";
 		for (size_t i = 0; i < Entries.size(); ++i)
 		{
@@ -898,12 +895,139 @@ struct FSoloRanking
 			if ((int)i < Limit) J += (i ? "," : "") + Item;
 			if (WantId && Entries[i].Id == WantId) Mine = Item;
 		}
-		J += "],\"mine\":" + Mine + "}";
-		return J;
+		J += "],\"mine\":" + Mine + ",";
 	}
 };
 
 static FSoloRanking gSoloRanking;
+
+// ------------------------------------------------------------------------------------------------
+// Ranking global: trayectoria de cada jugador (por nombre) sumando TODAS sus partidas, individuales
+// y con amigos. Ordena por puntos totales; a igualdad, mas victorias y menos partidas. Persistente.
+// ------------------------------------------------------------------------------------------------
+
+struct FGlobalEntry
+{
+	std::string Name; int Matches = 0, Solo = 0, Room = 0, Wins = 0, Podiums = 0, Points = 0, Best = 0, RoundsWon = 0; int64_t LastTs = 0;
+};
+
+struct FGlobalRanking
+{
+	static constexpr int kKeep = 500;
+	std::vector<FGlobalEntry> Entries;   // siempre ordenadas
+	std::string Path;
+
+	static bool Better(const FGlobalEntry& A, const FGlobalEntry& B)
+	{
+		if (A.Points != B.Points) return A.Points > B.Points;
+		if (A.Wins != B.Wins) return A.Wins > B.Wins;
+		if (A.Matches != B.Matches) return A.Matches < B.Matches;
+		return A.Name < B.Name;
+	}
+
+	void Load(const std::string& InPath)
+	{
+		Path = InPath; Entries.clear();
+		std::stringstream SS(ReadFile(Path)); std::string Line;
+		while (std::getline(SS, Line))
+		{
+			if (Line.empty() || Line[0] == '#') continue;
+			std::vector<std::string> F; std::stringstream LS(Line); std::string Tok;
+			while (std::getline(LS, Tok, '\t')) F.push_back(Tok);
+			if (F.size() < 10) continue;
+			FGlobalEntry E;
+			E.Name = SanitizeName(F[0]); E.Matches = std::atoi(F[1].c_str()); E.Solo = std::atoi(F[2].c_str()); E.Room = std::atoi(F[3].c_str());
+			E.Wins = std::atoi(F[4].c_str()); E.Podiums = std::atoi(F[5].c_str()); E.Points = std::atoi(F[6].c_str()); E.Best = std::atoi(F[7].c_str());
+			E.RoundsWon = std::atoi(F[8].c_str()); E.LastTs = std::strtoll(F[9].c_str(), nullptr, 10);
+			Entries.push_back(E);
+		}
+		std::stable_sort(Entries.begin(), Entries.end(), Better);
+		if ((int)Entries.size() > kKeep) Entries.resize(kKeep);
+	}
+
+	void Save() const
+	{
+		if (Path.empty()) return;
+		std::string Out = "# pf-global-ranking v1: name matches solo room wins podiums points best roundsWon lastTs\n";
+		for (const FGlobalEntry& E : Entries)
+		{
+			Out += E.Name + '\t' + std::to_string(E.Matches) + '\t' + std::to_string(E.Solo) + '\t' + std::to_string(E.Room) + '\t' +
+				std::to_string(E.Wins) + '\t' + std::to_string(E.Podiums) + '\t' + std::to_string(E.Points) + '\t' + std::to_string(E.Best) + '\t' +
+				std::to_string(E.RoundsWon) + '\t' + std::to_string((long long)E.LastTs) + '\n';
+		}
+		const std::string Tmp = Path + ".tmp";
+		FILE* F = std::fopen(Tmp.c_str(), "wb");
+		if (!F) { std::fprintf(stderr, "ranking global: no puedo escribir %s\n", Tmp.c_str()); return; }
+		std::fwrite(Out.data(), 1, Out.size(), F);
+		std::fclose(F);
+		std::rename(Tmp.c_str(), Path.c_str());
+	}
+
+	int PosOf(const std::string& Name) const
+	{
+		for (size_t i = 0; i < Entries.size(); ++i) if (Entries[i].Name == Name) return int(i) + 1;
+		return 0;
+	}
+
+	// Suma una partida terminada y devuelve el puesto global del jugador (1 = mejor).
+	int Record(const std::string& Name, int Score, int Rank, int RoundsWon, bool bSolo)
+	{
+		FGlobalEntry E;
+		const int Pos = PosOf(Name);
+		if (Pos) { E = Entries[size_t(Pos - 1)]; Entries.erase(Entries.begin() + (Pos - 1)); }
+		else E.Name = Name;
+		E.Matches++; if (bSolo) E.Solo++; else E.Room++;
+		E.Points += Score; E.Best = E.Matches == 1 ? Score : std::max(E.Best, Score);
+		if (Rank == 1) E.Wins++;
+		if (Rank <= 3) E.Podiums++;
+		E.RoundsWon += RoundsWon;
+		E.LastTs = (int64_t)std::time(nullptr);
+		auto It = std::upper_bound(Entries.begin(), Entries.end(), E, Better);
+		const int NewPos = int(It - Entries.begin()) + 1;
+		Entries.insert(It, E);
+		if ((int)Entries.size() > kKeep) Entries.resize(kKeep);
+		Save();
+		return NewPos <= kKeep ? NewPos : 0;
+	}
+
+	static std::string EntryJson(const FGlobalEntry& E, int Pos)
+	{
+		char Buf[384];
+		std::snprintf(Buf, sizeof Buf, "{\"pos\":%d,\"name\":%s,\"matches\":%d,\"solo\":%d,\"room\":%d,\"wins\":%d,\"podiums\":%d,\"points\":%d,\"best\":%d,\"roundsWon\":%d,\"ts\":%lld}",
+			Pos, JsonStr(E.Name).c_str(), E.Matches, E.Solo, E.Room, E.Wins, E.Podiums, E.Points, E.Best, E.RoundsWon, (long long)E.LastTs);
+		return Buf;
+	}
+
+	// Anade al JSON de /api/ranking: "globalTotal", "global" (top N) y "me" (la fila del nombre pedido, o null).
+	void AppendApi(std::string& J, int Limit, const std::string& Name) const
+	{
+		J += "\"globalTotal\":" + std::to_string(Entries.size()) + ",\"global\":[";
+		std::string Me = "null";
+		for (size_t i = 0; i < Entries.size(); ++i)
+		{
+			const std::string Item = EntryJson(Entries[i], int(i) + 1);
+			if ((int)i < Limit) J += (i ? "," : "") + Item;
+			if (!Name.empty() && Entries[i].Name == Name) Me = Item;
+		}
+		J += "],\"me\":" + Me + ",";
+	}
+};
+
+static FGlobalRanking gGlobalRanking;
+
+// GET /api/ranking?limit=N&id=I&name=X  ->  { total, solo[], mine, globalTotal, global[], me }
+static std::string RankingApiJson(const std::map<std::string, std::string>& Q)
+{
+	int Limit = Q.count("limit") ? std::atoi(Q.at("limit").c_str()) : 10;
+	Limit = std::max(1, std::min(100, Limit));
+	const int WantId = Q.count("id") ? std::atoi(Q.at("id").c_str()) : 0;
+	const std::string Name = Q.count("name") ? SanitizeName(Q.at("name")) : "";
+	std::string J = "{\"ok\":true,";
+	gSoloRanking.AppendApi(J, Limit, WantId);
+	gGlobalRanking.AppendApi(J, Limit, Name);
+	J.back() = '}';
+	return J;
+}
 
 struct FWebSession
 {
@@ -1007,15 +1131,21 @@ struct FWebSession
 		return Standings.back();
 	}
 
-	// Al terminar la partida: 1 humano + bots -> ranking individual global; >= 2 humanos -> clasificacion de la sala.
+	// Al terminar la partida: 1 humano + bots -> ranking individual; >= 2 humanos -> clasificacion de la sala.
+	// En ambos casos cada humano suma la partida a su trayectoria del ranking global.
 	void RecordMatch()
 	{
 		if (!T) return;
 		const int N = T->NumPlayers;
 		auto RankOf = [&](int Seat) { int R = 1; for (int j = 0; j < N; ++j) if (MatchScore[j] > MatchScore[Seat]) ++R; return R; };
 		auto RoundsWonBy = [&](int Seat) { int W = 0; for (int r = 0; r < NumRounds && r < 9; ++r) if (RoundWinners[r] == Seat) ++W; return W; };
+		const bool bSolo = HumansAtStart == 1 && N >= 2;
+		if (!bSolo && HumansAtStart < 2) return;
 
-		if (HumansAtStart == 1 && N >= 2)
+		for (int i = 0; i < N; ++i)
+			if (T->Profiles[i] == EProfile::Human) gGlobalRanking.Record(WebNames[i], MatchScore[i], RankOf(i), RoundsWonBy(i), bSolo);
+
+		if (bSolo)
 		{
 			for (int i = 0; i < N; ++i)
 			{
@@ -1029,7 +1159,6 @@ struct FWebSession
 			}
 			return;
 		}
-		if (HumansAtStart < 2) return;
 
 		RoomMatches++;
 		for (int i = 0; i < N; ++i)
@@ -1194,6 +1323,7 @@ struct FWebSession
 		J += std::string("\"freeTime\":") + (gFreeTime ? "true" : "false") + ",";
 		J += "\"turnMode\":" + JsonStr(TurnModeName(gTurnMode)) + ",";
 		AppendRanking(J);
+		J += "\"globalRank\":" + std::to_string(You ? gGlobalRanking.PosOf(You->Name) : 0) + ",\"globalTotal\":" + std::to_string(gGlobalRanking.Entries.size()) + ",";
 	}
 
 	std::string StateJson(double Now, const std::string& Token) const
@@ -1461,7 +1591,7 @@ static std::string LandingJson(double Now)
 		"{\"phase\":\"none\",\"round\":1,\"rounds\":3,\"len\":4,\"now\":%.3f,\"phaseEnd\":0,\"roundStart\":0,"
 		"\"spectator\":true,\"humanSeat\":-1,\"joined\":false,\"isHost\":false,\"roomCode\":\"\",\"bots\":0,"
 		"\"minPlayers\":%d,\"maxPlayers\":%d,\"pace\":\"slow\",\"attemptSeconds\":10,\"sdAttemptSeconds\":6,\"freeTime\":false,"
-		"\"turnMode\":\"simultaneous\",\"solo\":false,\"soloRank\":0,\"soloId\":0,\"roomMatches\":0,\"roomRanking\":[],"
+		"\"turnMode\":\"simultaneous\",\"solo\":false,\"soloRank\":0,\"soloId\":0,\"roomMatches\":0,\"roomRanking\":[],\"globalRank\":0,\"globalTotal\":0,"
 		"\"turnPlayer\":-1,\"turnNumber\":0,\"turnOrder\":[],\"secret\":null,"
 		"\"winner\":-1,\"alertPlayer\":-1,\"suddenDeathEnd\":0,\"players\":[],\"entries\":[],\"private\":[],\"events\":[]}",
 		Now, kMinPlayers, kMaxPlayers);
@@ -1528,7 +1658,7 @@ struct FRoomHub
 	std::string Handle(const std::string& Path, std::map<std::string, std::string> Q, const std::string& Token, double Now)
 	{
 		LastCookie.clear();
-		if (Path == "/api/ranking") return gSoloRanking.ApiJson(Q);
+		if (Path == "/api/ranking") return RankingApiJson(Q);
 		if (Q.count("code")) Q["code"] = NormCode(Q["code"]);
 		const bool bHasCode = Q.count("code") && !Q["code"].empty();
 		if (Path == "/api/solo" || Path == "/api/create" || (Path == "/api/join" && !bHasCode))
@@ -1683,6 +1813,7 @@ static int RunServe(int Port, int DefaultBots, const std::string& WebDir)
 	std::printf("Picas y Famas sandbox web: http://127.0.0.1:%d/\n", Port);
 	std::printf("Salas bajo demanda · minimo %d, maximo %d jugadores%s\n", kMinPlayers, kMaxPlayers, gFreeTime ? " · tiempo libre por defecto" : "");
 	std::printf("Ranking individual: %s (%d partidas)\n", gSoloRanking.Path.c_str(), (int)gSoloRanking.Entries.size());
+	std::printf("Ranking global:     %s (%d jugadores)\n", gGlobalRanking.Path.c_str(), (int)gGlobalRanking.Entries.size());
 	std::printf("Crea sala en el navegador e invita con el enlace. Ctrl+C para parar.\n");
 	std::fflush(stdout);
 
@@ -1806,6 +1937,7 @@ int main(int Argc, char** Argv)
 		if (DataDir.empty()) DataDir = Dir + "/data";
 		mkdir(DataDir.c_str(), 0755);   // si ya existe (o falla), Save() avisara al escribir
 		gSoloRanking.Load(DataDir + "/ranking_solo.tsv");
+		gGlobalRanking.Load(DataDir + "/ranking_global.tsv");
 		return RunServe(Port, Nums.size() > 0 ? std::max(0, std::min(6, Nums[0])) : 0, Dir + "/web");
 	}
 	std::printf("uso: pf_sandbox play [bots] [--seed N] | sim [partidas] [jugadores] [--seed N] [--quiet] | serve [bots] [--port P] [--data DIR]\n");

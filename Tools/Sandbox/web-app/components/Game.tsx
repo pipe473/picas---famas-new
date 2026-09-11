@@ -146,7 +146,7 @@ export default function Game() {
         <Controls S={S} onToast={pushToast} />
       </main>
       <Toasts items={toasts} />
-      <Overlay S={S} />
+      <Overlay S={S} onRanking={openRank} />
       {rankOpen ? <RankingDialog S={S} onClose={closeRank} /> : null}
       <SoundDock />
     </>

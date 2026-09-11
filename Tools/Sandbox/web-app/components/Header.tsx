@@ -190,8 +190,9 @@ function HeaderMenu({ S, onRanking }: { S: GameState; onRanking: () => void }) {
           >
             Ranking
             <small>
-              Individual
+              Individual, global
               {S.roomCode ? ` y clasificación de la sala${S.roomMatches > 0 ? ` · ${S.roomMatches} ${S.roomMatches === 1 ? "partida" : "partidas"}` : ""}` : ""}
+              {S.globalRank > 0 ? ` · eres #${S.globalRank} global` : ""}
             </small>
           </button>
 

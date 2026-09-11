@@ -3,7 +3,7 @@
 import { memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { TrophyIcon } from "@/components/Icons";
 import { fetchRanking } from "@/lib/api";
-import { COLORS, type GameState, type RankingResponse, type SoloEntry } from "@/lib/types";
+import { COLORS, type GameState, type GlobalEntry, type RankingResponse, type SoloEntry } from "@/lib/types";
 
 const PACE_LABEL: Record<string, string> = { slow: "tranquilo", normal: "normal", fast: "frenético" };
 const TURNS_LABEL: Record<string, string> = { simultaneous: "a la vez", seat: "por turnos", random: "turnos aleatorios" };
@@ -158,32 +158,122 @@ export const RoomRanking = memo(function RoomRanking({ S }: { S: GameState }) {
   );
 });
 
-type Tab = "solo" | "room";
+/**
+ * Ranking global (persistente): la trayectoria de cada jugador sumando todas sus partidas, individuales
+ * y con amigos. `highlightName` resalta al jugador propio y lo añade al final si queda fuera del top.
+ */
+export const GlobalRanking = memo(function GlobalRanking({ limit = 10, highlightName = "" }: { limit?: number; highlightName?: string }) {
+  const [data, setData] = useState<RankingResponse | null | undefined>(undefined);
 
-/** Ambos rankings con pestañas. La de sala solo tiene sentido dentro de una sala. */
+  useEffect(() => {
+    let alive = true;
+    setData(undefined);
+    void fetchRanking(limit, 0, highlightName).then((r) => {
+      if (alive) setData(r && r.ok ? r : null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [limit, highlightName]);
+
+  if (data === undefined) {
+    return (
+      <div className="loading" aria-label="Cargando ranking">
+        <i />
+        <i />
+        <i />
+      </div>
+    );
+  }
+  if (data === null) return <div className="rank-empty">No se pudo cargar el ranking.</div>;
+  if (!data.global?.length) {
+    return (
+      <div className="rank-empty">
+        Todavía no hay jugadores en el ranking global. <b>Termina una partida</b>, contra bots o con amigos, y aparecerás aquí.
+      </div>
+    );
+  }
+
+  const rows: GlobalEntry[] = [...data.global];
+  if (data.me && !rows.some((e) => e.name === data.me!.name)) rows.push(data.me);
+
+  return (
+    <table className="rank-table" aria-label="Ranking global">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Jugador</th>
+          <th className="n">Puntos</th>
+          <th className="n">Victorias</th>
+          <th className="n">Partidas</th>
+          <th className="n opt">Media</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((e) => (
+          <tr key={e.name} className={highlightName && e.name === highlightName ? "me" : ""}>
+            <td>
+              <Pos n={e.pos} />
+            </td>
+            <td className="who">
+              {e.name}
+              <small>
+                {e.solo} {e.solo === 1 ? "individual" : "individuales"} · {e.room} con amigos
+                {e.best > 0 ? ` · mejor ${e.best}` : ""}
+              </small>
+            </td>
+            <td className="n pts">{e.points}</td>
+            <td className="n">{e.wins}</td>
+            <td className="n muted">{e.matches}</td>
+            <td className="n opt muted" title="puntos por partida">
+              {e.matches ? Math.round(e.points / e.matches) : 0}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+});
+
+type Tab = "solo" | "room" | "global";
+
+/** Nombre con el que juega quien mira (para resaltarlo en el ranking global), o "" si aún no está sentado. */
+export function myName(S: GameState): string {
+  if (!S.joined) return "";
+  return S.players.find((p) => p.seat === S.humanSeat)?.name ?? "";
+}
+
+/** Los tres rankings con pestañas. La de sala solo tiene sentido dentro de una sala. */
 export function RankingTabs({ S, initial }: { S: GameState; initial?: Tab }) {
   const inRoom = S.joined && !!S.roomCode;
   const [tab, setTab] = useState<Tab>(initial ?? (inRoom && S.roomRanking.length ? "room" : "solo"));
   const active: Tab = tab === "room" && !inRoom ? "solo" : tab;
+  const tabBtn = (t: Tab, label: ReactNode) => (
+    <button type="button" role="tab" aria-selected={active === t} className={active === t ? "on" : ""} onClick={() => setTab(t)}>
+      {label}
+    </button>
+  );
   return (
     <>
-      {inRoom ? (
-        <div className="rank-tabs" role="tablist" aria-label="Tipo de ranking">
-          <button type="button" role="tab" aria-selected={active === "solo"} className={active === "solo" ? "on" : ""} onClick={() => setTab("solo")}>
-            Individual
-          </button>
-          <button type="button" role="tab" aria-selected={active === "room"} className={active === "room" ? "on" : ""} onClick={() => setTab("room")}>
-            Sala {S.roomCode}
-            {S.roomMatches > 0 ? <span className="rank-count">{S.roomMatches}</span> : null}
-          </button>
-        </div>
-      ) : null}
+      <div className="rank-tabs" role="tablist" aria-label="Tipo de ranking">
+        {tabBtn("solo", "Individual")}
+        {inRoom
+          ? tabBtn(
+              "room",
+              <>
+                Sala {S.roomCode}
+                {S.roomMatches > 0 ? <span className="rank-count">{S.roomMatches}</span> : null}
+              </>,
+            )
+          : null}
+        {tabBtn("global", "Global")}
+      </div>
       {active === "solo" ? (
         <>
           <p className="sub rank-note">Mejores partidas contra bots de todos los jugadores de este servidor.</p>
           <SoloRanking limit={10} highlightId={S.solo ? S.soloId : 0} />
         </>
-      ) : (
+      ) : active === "room" ? (
         <>
           <p className="sub rank-note">
             {S.roomMatches > 0
@@ -191,6 +281,13 @@ export function RankingTabs({ S, initial }: { S: GameState; initial?: Tab }) {
               : "Acumula las partidas con amigos de esta sala."}
           </p>
           <RoomRanking S={S} />
+        </>
+      ) : (
+        <>
+          <p className="sub rank-note">
+            Trayectoria de cada jugador sumando <b>todas</b> sus partidas, contra bots y con amigos. Ordena por puntos totales; a igualdad, más victorias.
+          </p>
+          <GlobalRanking limit={10} highlightName={myName(S)} />
         </>
       )}
     </>

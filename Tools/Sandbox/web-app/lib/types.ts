@@ -107,10 +107,35 @@ export type GameState = {
   soloId: number;
   roomMatches: number;
   roomRanking: RoomStanding[];
+  /** Puesto de tu nombre en el ranking global (0 si aún no has terminado ninguna partida) y jugadores en él. */
+  globalRank: number;
+  globalTotal: number;
+};
+
+/** Trayectoria de un jugador en el ranking global: todas sus partidas, individuales y con amigos. */
+export type GlobalEntry = {
+  pos: number;
+  name: string;
+  matches: number;
+  solo: number;
+  room: number;
+  wins: number;
+  podiums: number;
+  points: number;
+  best: number;
+  roundsWon: number;
+  ts: number;
 };
 
 export type ApiResult = { ok: boolean; error?: string };
-export type RankingResponse = ApiResult & { total: number; solo: SoloEntry[]; mine: SoloEntry | null };
+export type RankingResponse = ApiResult & {
+  total: number;
+  solo: SoloEntry[];
+  mine: SoloEntry | null;
+  globalTotal: number;
+  global: GlobalEntry[];
+  me: GlobalEntry | null;
+};
 export type ToastItem = { id: number; text: string; cls?: string; leaving?: boolean };
 
 export const COLORS = [

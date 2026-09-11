@@ -46,10 +46,14 @@ export const leaveRoom = () => api("/api/leave");
 export const abortMatch = () => api("/api/abort");
 export const resetRoom = () => api("/api/reset");
 
-/** Top del ranking individual global; con `id` devuelve además esa partida con su puesto aunque quede fuera del top. */
-export function fetchRanking(limit = 10, id = 0) {
+/**
+ * Top del ranking individual y del global. Con `id` devuelve además esa partida individual con su puesto
+ * aunque quede fuera del top; con `name`, la fila global de ese jugador.
+ */
+export function fetchRanking(limit = 10, id = 0, name = "") {
   const q = new URLSearchParams({ limit: String(limit) });
   if (id) q.set("id", String(id));
+  if (name) q.set("name", name);
   return api<RankingResponse>(`/api/ranking?${q.toString()}`, { skipToken: true });
 }
 
