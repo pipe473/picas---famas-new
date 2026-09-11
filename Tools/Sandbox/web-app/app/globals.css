@@ -846,6 +846,10 @@ main.spectator .events { max-height: none; flex: 1; }
 .card .opts { display: flex; gap: 10px 14px; justify-content: center; margin-top: 16px; align-items: center; color: var(--muted); font-size: var(--fs-md); flex-wrap: wrap; }
 .card .opts label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .card select { padding: 8px 30px 8px 10px; font-size: var(--fs-md); }
+.card .opts-hint {
+  margin: 10px auto 0; max-width: 460px; color: var(--muted); font-size: var(--fs-sm); line-height: 1.5;
+  animation: fade-in var(--dur-base) ease;
+}
 .count {
   font-size: var(--fs-display); font-weight: 800; line-height: 1; letter-spacing: var(--track-tighter); color: var(--fama);
   text-shadow: 0 0 60px var(--glow-count); animation: pop .9s var(--ease-out) both; margin: 12px 0;

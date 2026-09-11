@@ -183,4 +183,71 @@ bool FPFSuddenDeathAndBluff::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPFFreeTime, "PicasyFamas.Engine.TiempoLibre", kFlags)
+bool FPFFreeTime::RunTest(const FString& Parameters)
+{
+	// Simultaneo: sin relojes, sin Pasos, sin tope; la alerta N-1 Famas no lanza Muerte Sudada.
+	{
+		FRecorder Rec; PF::FRoundEngine Engine; Engine.SetListener(&Rec);
+		for (uint8 i = 0; i < 3; ++i) Engine.AddPlayer(i);
+		const PF::FRoundConfig Cfg = PF::FRoundConfig{}.MakeFreeTime();
+		Engine.StartRound(Cfg, 11, 1000.0);
+		TestTrue(TEXT("motor en tiempo libre"), Engine.IsFreeTime());
+		for (uint8 i = 0; i < 3; ++i) TestEqual(TEXT("reloj parado al arrancar"), Engine.GetPlayer(i).AttemptDeadline, 0.0);
+
+		for (double T = 1000.0; T < 1600.0; T += 1.0) Engine.Tick(T);
+		TestTrue(TEXT("sigue viva tras 10 minutos (sin cap)"), Engine.IsRoundActive());
+		TestEqual(TEXT("ningun Paso por expiracion"), Rec.Count(PF::EEventType::Pass), 0);
+		TestEqual(TEXT("nadie Inactivo"), Rec.Count(PF::EEventType::PlayerInactive), 0);
+
+		const PF::PackedCode Secret = Engine.GetSecretCode();
+		Engine.Enqueue(0, WithFamas(Secret, 4, 3), 0, 0, 0, 1600.0, 0.0);
+		Engine.Tick(1600.033);
+		TestEqual(TEXT("alerta emitida"), static_cast<int32>(Engine.GetAlertPlayer()), 0);
+		TestEqual(TEXT("sin SuddenDeathStarted"), Rec.Count(PF::EEventType::SuddenDeathStarted), 0);
+		TestEqual(TEXT("sin cuenta atras"), Engine.GetSuddenDeathEndTime(), 0.0);
+		TestEqual(TEXT("reloj sigue parado tras tirar"), Engine.GetPlayer(0).AttemptDeadline, 0.0);
+		for (double T = 1601.0; T < 1700.0; T += 1.0) Engine.Tick(T);
+		TestTrue(TEXT("no expira por Muerte Sudada"), Engine.IsRoundActive());
+
+		Engine.Enqueue(1, Secret, 0, 0, 0, 1700.0, 0.0);
+		Engine.Tick(1700.033);
+		TestTrue(TEXT("acaba solo por acierto"), !Engine.IsRoundActive() && Engine.GetEndReason() == PF::ERoundEndReason::Solved);
+	}
+
+	// Por turnos: el turno dura hasta que su dueno tira; si todos se caen y agotan la gracia, no se cuelga.
+	{
+		FRecorder Rec; PF::FRoundEngine Engine; Engine.SetListener(&Rec);
+		for (uint8 i = 0; i < 3; ++i) Engine.AddPlayer(i);
+		PF::FRoundConfig Cfg = PF::FRoundConfig{}.MakeFreeTime();
+		Cfg.TurnMode = PF::ETurnMode::SeatOrder;
+		Engine.StartRound(Cfg, 5, 1000.0);
+		TestEqual(TEXT("turno inicial"), static_cast<int32>(Engine.GetCurrentTurnPlayer()), 0);
+		const PF::FRoundEvent* TC = Rec.Last(PF::EEventType::TurnChanged);
+		TestTrue(TEXT("TurnChanged sin deadline"), TC && TC->Time == 0.0);
+
+		for (double T = 1000.0; T < 1300.0; T += 0.5) Engine.Tick(T);
+		TestTrue(TEXT("el turno no pasa solo"), Engine.GetCurrentTurnPlayer() == 0 && Engine.GetTurnNumber() == 1);
+
+		Engine.Enqueue(1, WithFamas(Engine.GetSecretCode(), 4, 1), 0, 0, 0, 1300.0, 0.0);
+		Engine.Tick(1300.033);
+		const PF::FRoundEvent* Rej = Rec.Last(PF::EEventType::GuessRejected);
+		TestTrue(TEXT("fuera de turno sigue rechazado"), Rej && Rej->Player == 1 && Rej->Value == static_cast<int32>(PF::ERejectReason::NotYourTurn));
+
+		Engine.Enqueue(0, WithFamas(Engine.GetSecretCode(), 4, 1), 0, 0, 0, 1301.0, 0.0);
+		Engine.Tick(1301.033);
+		TestTrue(TEXT("tirar pasa el turno"), Engine.GetCurrentTurnPlayer() == 1 && Engine.GetTurnNumber() == 2);
+		TestEqual(TEXT("el nuevo turno tampoco tiene reloj"), Engine.GetPlayer(1).AttemptDeadline, 0.0);
+
+		Engine.SetPlayerConnected(0, false, 1302.0);
+		Engine.SetPlayerConnected(1, false, 1302.0);
+		Engine.SetPlayerConnected(2, false, 1302.0);
+		Engine.Tick(1310.0);
+		TestTrue(TEXT("dentro de la gracia espera"), Engine.IsRoundActive());
+		Engine.Tick(1330.0);
+		TestTrue(TEXT("todos caidos -> NotEnoughPlayers"), !Engine.IsRoundActive() && Engine.GetEndReason() == PF::ERoundEndReason::NotEnoughPlayers);
+	}
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

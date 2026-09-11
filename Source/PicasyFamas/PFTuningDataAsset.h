@@ -42,16 +42,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ronda")
 	EPFTurnMode TurnMode = EPFTurnMode::Simultaneous;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ronda", meta = (ClampMin = 3.0))
+	// Tiempo libre: nadie tiene reloj de intento (ni Pasos por expiracion), la ronda no tiene tope y la alerta de
+	// N-1 Famas no lanza Muerte Sudada. Por turnos, el turno dura hasta que su dueno envia. Ignora AttemptSeconds,
+	// SuddenDeathSeconds y RoundCapSeconds.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ronda")
+	bool bFreeTime = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ronda", meta = (ClampMin = 3.0, EditCondition = "!bFreeTime"))
 	float AttemptSeconds = 10.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ronda", meta = (ClampMin = 2.0))
 	float SuddenDeathAttemptSeconds = 6.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ronda", meta = (ClampMin = 5.0))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ronda", meta = (ClampMin = 5.0, EditCondition = "!bFreeTime"))
 	float SuddenDeathSeconds = 20.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ronda", meta = (ClampMin = 30.0))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ronda", meta = (ClampMin = 30.0, EditCondition = "!bFreeTime"))
 	float RoundCapSeconds = 120.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ronda", meta = (ClampMin = 0.0))

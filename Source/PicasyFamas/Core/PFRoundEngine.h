@@ -3,9 +3,9 @@
 //
 // Flujo por tick del servidor:
 //   1) Tick(Now) resuelve la cola de intentos ORDENADA por tiempo ajustado por latencia (no por llegada).
-//   2) Relojes de intento expirados -> Paso (y, si se encadenan, Inactivo).
+//   2) Relojes de intento expirados -> Paso (y, si se encadenan, Inactivo). Con tiempo libre no hay relojes.
 //   3) Revelaciones diferidas (Encriptar / Senuelo) -> filtran candidatos y acreditan bits con retraso.
-//   4) Fin de Muerte Sudada / cap de ronda.
+//   4) Fin de Muerte Sudada / cap de ronda (ambos opcionales: ver FRoundConfig).
 #pragma once
 
 #include <cstdint>
@@ -52,6 +52,8 @@ namespace PF
 		const FPlayerSlot&  GetPlayer(uint8_t Player) const { return Players[Player]; }
 		int32_t             NumPresentPlayers() const;
 		int32_t             NumConnectedActivePlayers() const;
+		int32_t             NumRemainingPlayers() const;   // presentes que siguen conectados o aun dentro de la gracia de reconexion
+		bool                IsFreeTime() const { return Config.IsFreeTime(); }   // sin reloj de intento
 
 		int32_t             NumEntries() const { return EntryCount; }
 		const FGuessEntry&  EntryAt(int32_t Index) const { return Entries[Index]; }

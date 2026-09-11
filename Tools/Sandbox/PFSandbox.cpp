@@ -5,7 +5,9 @@
 //   pf_sandbox sim  [partidas] [jugadores] [--seed N] simulacion acelerada con estadisticas
 //   opciones:  --turns seat|random|simultaneous   modo por turnos (el reloj corre solo para quien tiene el turno)
 //              --pace fast|normal|slow            realismo de los bots (por defecto slow en serve)
-//              --attempt N                        segundos por intento (por defecto 10)
+//              --attempt N|free                   segundos por intento (por defecto 10); "free" = tiempo libre:
+//                                                 sin reloj de intento, sin tope de ronda ni cuenta atras de Muerte Sudada
+//              --free                             atajo de --attempt free
 //              --human         bots con latencia de lectura (3 s) y tiempos de pensar x2.5
 //              --decoy-cap N   tope de rivales que puntuan por un senuelo (0 = sin tope, GDD v0.2)
 //              --quiet         sin progreso en sim
@@ -82,7 +84,24 @@ static double gThinkScale  = 1.0;   // multiplicador de los tiempos de pensar
 static double gSloppiness  = 0.0;   // prob. de que el bot NO procese una pista ajena hasta pasados 12 s (humanos no leen todo)
 static int    gMemory      = 0;     // cuantas pistas AJENAS recientes retiene el bot (0 = todas). Una persona maneja 3-5.
 static double gAttemptSeconds = 0;  // reloj por intento (0 = el del motor, 10 s). Palanca de diseno del ritmo.
+static bool   gFreeTime = false;    // tiempo libre: sin reloj de intento, sin tope de ronda ni cuenta atras de Muerte Sudada
 static ETurnMode gTurnMode = ETurnMode::Simultaneous;   // simultaneo | por turnos (asiento) | por turnos (aleatorio)
+
+// Sin reloj del motor, los bots se imponen uno propio para que la mesa no se quede esperando a un Cerrador
+// que solo tira con <= 2 candidatos (y, por turnos, para que suelten el turno). Es ritmo de bot, no regla.
+static constexpr double kBotSelfClockSeconds = 10.0;
+
+// Interpreta el valor de --attempt / ?attempt=: "free"/"libre"/"0" = tiempo libre; N = segundos; otro = por defecto.
+static void ParseAttemptOption(const std::string& S, double& OutSeconds, bool& OutFree)
+{
+	if (S == "free" || S == "libre" || S == "0" || S == "none")
+	{
+		OutFree = true; OutSeconds = 0; return;
+	}
+	OutFree = false;
+	OutSeconds = std::atof(S.c_str());
+	if (OutSeconds < 0) OutSeconds = 0;
+}
 
 static ETurnMode ParseTurnMode(const std::string& S)
 {
@@ -127,6 +146,7 @@ struct FBot
 	int      SeenRevision = -1;
 	double   NextThinkTime = 0.0;
 	double   LastRebuildTime = -1.0;
+	double   SelfDeadline = 0.0;           // reloj propio del bot cuando el motor no le pone ninguno (tiempo libre)
 	bool     bTurnArmed = false;
 	bool     bDecoyUsed = false, bEncryptUsed = false;
 	int      Contradictions = 0;
@@ -140,6 +160,7 @@ struct FBot
 		MyTruth.clear();
 		SeenRevision = -1;
 		bDecoyUsed = bEncryptUsed = false;
+		SelfDeadline = 0.0;
 		NextThinkTime = Now + Uniform(1.5, 4.0);
 	}
 
@@ -204,11 +225,18 @@ struct FBot
 		// Por turnos: mientras no sea mi turno solo observo. Al recibirlo, "empiezo a pensar" desde ese momento.
 		if (E.IsTurnBased())
 		{
-			if (E.GetCurrentTurnPlayer() != Seat) { bTurnArmed = false; return A; }
+			if (E.GetCurrentTurnPlayer() != Seat) { bTurnArmed = false; SelfDeadline = 0.0; return A; }
 			if (!bTurnArmed) { bTurnArmed = true; NextThinkTime = Now + Uniform(1.0, 3.0) * gThinkScale * 0.6; }
 		}
 
-		const double TimeLeft = S.AttemptDeadline > 0 ? S.AttemptDeadline - Now : 1e9;
+		double TimeLeft = 1e9;
+		if (S.AttemptDeadline > 0) { TimeLeft = S.AttemptDeadline - Now; SelfDeadline = 0.0; }
+		else if (E.IsFreeTime())
+		{
+			// Tiempo libre: el motor no apremia, pero un bot que nunca tira bloquea la mesa. Reloj propio.
+			if (SelfDeadline <= 0.0) SelfDeadline = Now + kBotSelfClockSeconds * Uniform(0.8, 1.3);
+			TimeLeft = SelfDeadline - Now;
+		}
 		// Como una persona: si el reloj se acaba, envia lo mejor que tenga aunque no haya terminado de pensar.
 		if (Now < NextThinkTime && TimeLeft > 1.2) return A;
 		const bool bAlert = E.GetAlertPlayer() != kNoPlayer;
@@ -252,6 +280,7 @@ struct FBot
 
 		A.bGuess = true;
 		A.Guess = Pick();
+		SelfDeadline = 0.0;   // tras tirar, el reloj propio se rearma en la siguiente pasada
 		if (Profile == EProfile::Farolero && !bDecoyUsed && N > 30 && S.bHasDecoyToken)
 		{
 			A.Flags = GuessFlags::Decoy; A.DF = uint8_t(std::min(Len - 1, 2)); A.DP = 1; bDecoyUsed = true;
@@ -326,9 +355,11 @@ struct FTable : public IRoundListener
 
 	void StartRound(uint64_t Seed, double Now)
 	{
+		Config = FRoundConfig{};
 		Config.CodeLength = NumPlayers >= 6 ? 5 : 4;
 		Config.Scoring.DecoyEffectiveMaxTargets = gDecoyCap;
 		if (gAttemptSeconds > 0) Config.AttemptSeconds = gAttemptSeconds;
+		if (gFreeTime) Config = Config.MakeFreeTime();
 		Config.TurnMode = gTurnMode;
 		Round = FRoundStats{};
 		RoundStart = Now;
@@ -382,7 +413,12 @@ struct FTable : public IRoundListener
 			if (E.Aux0 == (uint8_t)EScoreReason::LightningDeduction) Round.bLightning = true;
 			break;
 		case EEventType::Alert:
-			Round.bAlert = true; Push("ALERTA: " + Who + " tiene " + std::to_string(Config.CodeLength - 1) + " FAMAS. Muerte Sudada: 20 s, relojes a 6 s"); break;
+			Round.bAlert = true;
+			if (Config.HasSuddenDeathTimer())
+				Push("ALERTA: " + Who + " tiene " + std::to_string(Config.CodeLength - 1) + " FAMAS. Muerte Sudada: " + std::to_string(int(Config.SuddenDeathSeconds)) + " s, relojes a " + std::to_string(int(Config.SuddenDeathAttemptSeconds)) + " s");
+			else
+				Push("ALERTA: " + Who + " tiene " + std::to_string(Config.CodeLength - 1) + " FAMAS (tiempo libre: sin cuenta atras)");
+			break;
 		case EEventType::KeyClue:
 			KeyClueTime = E.Time; break;   // invisible para los jugadores; solo telemetria
 		case EEventType::Solved:
@@ -437,11 +473,14 @@ static void Render(const FTable& T, double Now, int RoundIndex, int NumRounds, c
 	Out += "\033[2J\033[H";
 	char Buf[256];
 
-	std::snprintf(Buf, sizeof Buf, "PICAS Y FAMAS  |  ronda %d/%d  |  t=%s  |  %d digitos  |  %s\n", RoundIndex + 1, NumRounds, Clock(Now - T.RoundStart).c_str(), Len, Phase.c_str());
+	std::snprintf(Buf, sizeof Buf, "PICAS Y FAMAS  |  ronda %d/%d  |  t=%s  |  %d digitos  |  %s%s\n", RoundIndex + 1, NumRounds, Clock(Now - T.RoundStart).c_str(), Len, Phase.c_str(), E.IsFreeTime() ? "  |  tiempo libre" : "");
 	Out += Buf;
 	if (E.GetAlertPlayer() != kNoPlayer && E.IsRoundActive())
 	{
-		std::snprintf(Buf, sizeof Buf, "!! ALERTA %d FAMAS: %s  |  MUERTE SUDADA %s !!\n", Len - 1, T.Names[E.GetAlertPlayer()].c_str(), Clock(E.GetSuddenDeathEndTime() - Now).c_str());
+		if (E.GetSuddenDeathEndTime() > 0.0)
+			std::snprintf(Buf, sizeof Buf, "!! ALERTA %d FAMAS: %s  |  MUERTE SUDADA %s !!\n", Len - 1, T.Names[E.GetAlertPlayer()].c_str(), Clock(E.GetSuddenDeathEndTime() - Now).c_str());
+		else
+			std::snprintf(Buf, sizeof Buf, "!! ALERTA %d FAMAS: %s !!\n", Len - 1, T.Names[E.GetAlertPlayer()].c_str());
 		Out += Buf;
 	}
 	Out += "\n  #  Jugador        Mejor    Int  Ronda  Partida  Reloj   Fichas  Estado\n";
@@ -658,7 +697,7 @@ static int RunSim(int Matches, int Players, uint64_t Seed, bool bQuiet)
 		if (!bQuiet && (m + 1) % 50 == 0) std::printf("  ... %d partidas\n", m + 1);
 	}
 
-	std::printf("\n=== SIMULACION: %d partidas x 3 rondas, %d jugadores (%d digitos), semilla %llu ===\n", Matches, Players, Players >= 6 ? 5 : 4, (unsigned long long)Seed);
+	std::printf("\n=== SIMULACION: %d partidas x 3 rondas, %d jugadores (%d digitos), semilla %llu%s ===\n", Matches, Players, Players >= 6 ? 5 : 4, (unsigned long long)Seed, gFreeTime ? ", tiempo libre" : "");
 	std::printf("Rondas: %d   duracion media %.1f s  (min %.1f, max %.1f)\n", A.Rounds, A.Dur / A.Rounds, A.MinDur, A.MaxDur);
 	std::printf("Fin por: acierto %.0f%%  |  Muerte Sudada expirada %.0f%%  |  cap 120 s %.0f%%\n", 100.0 * A.Solved / A.Rounds, 100.0 * A.SD / A.Rounds, 100.0 * A.Cap / A.Rounds);
 	std::printf("Rondas con alerta N-1 Famas: %.0f%%   Relampago: %.0f%%   Golpe de intuicion: %.0f%%\n", 100.0 * A.Alerts / A.Rounds, 100.0 * A.Lightning / A.Rounds, 100.0 * A.Intuition / A.Rounds);
@@ -780,12 +819,14 @@ struct FWebSession
 	int RoundsPlayed = 0;
 	std::string PaceName = "slow";
 	double SessionAttempt = 0;
+	bool SessionFreeTime = false;
 	ETurnMode SessionTurns = ETurnMode::Simultaneous;
 
 	void ApplyGlobals() const
 	{
 		SetPace(PaceName);
 		gAttemptSeconds = SessionAttempt;
+		gFreeTime = SessionFreeTime;
 		gTurnMode = SessionTurns;
 	}
 
@@ -931,8 +972,10 @@ struct FWebSession
 			JsonStr(RoomCode).c_str(), Bots, kMinPlayers, kMaxPlayers);
 		J += Buf;
 		J += "\"pace\":" + JsonStr(PaceName) + ",";
-		J += "\"attemptSeconds\":" + std::to_string(int(gAttemptSeconds > 0 ? gAttemptSeconds : FRoundConfig{}.AttemptSeconds)) + ",";
-		J += "\"sdAttemptSeconds\":" + std::to_string(int(FRoundConfig{}.SuddenDeathAttemptSeconds)) + ",";
+		// attemptSeconds = 0 significa tiempo libre (sin reloj); freeTime lo hace explicito para el HUD.
+		J += "\"attemptSeconds\":" + std::to_string(gFreeTime ? 0 : int(gAttemptSeconds > 0 ? gAttemptSeconds : FRoundConfig{}.AttemptSeconds)) + ",";
+		J += "\"sdAttemptSeconds\":" + std::to_string(gFreeTime ? 0 : int(FRoundConfig{}.SuddenDeathAttemptSeconds)) + ",";
+		J += std::string("\"freeTime\":") + (gFreeTime ? "true" : "false") + ",";
 		J += "\"turnMode\":" + JsonStr(TurnModeName(gTurnMode)) + ",";
 	}
 
@@ -1124,7 +1167,14 @@ struct FWebSession
 			if (Phase != EPhase::Lobby && Phase != EPhase::MatchEnd) return "{\"ok\":false,\"error\":\"la partida ya empezo\"}";
 			if (Q.count("bots")) Bots = std::atoi(Q.at("bots").c_str());
 			if (Q.count("pace")) { PaceName = Q.at("pace"); SetPace(PaceName); }
-			if (Q.count("attempt")) { const int A = std::atoi(Q.at("attempt").c_str()); SessionAttempt = (A >= 5 && A <= 60) ? A : 0; gAttemptSeconds = SessionAttempt; }
+			if (Q.count("attempt"))
+			{
+				double A = 0; bool bFree = false;
+				ParseAttemptOption(Q.at("attempt"), A, bFree);
+				SessionFreeTime = bFree;
+				SessionAttempt = (!bFree && A >= 5 && A <= 60) ? A : 0;
+				gAttemptSeconds = SessionAttempt; gFreeTime = SessionFreeTime;
+			}
 			if (Q.count("turns")) { SessionTurns = ParseTurnMode(Q.at("turns")); gTurnMode = SessionTurns; }
 			ClampBots();
 			return "{\"ok\":true,\"bots\":" + std::to_string(Bots) + "}";
@@ -1193,7 +1243,7 @@ static std::string LandingJson(double Now)
 	std::snprintf(Buf, sizeof Buf,
 		"{\"phase\":\"none\",\"round\":1,\"rounds\":3,\"len\":4,\"now\":%.3f,\"phaseEnd\":0,\"roundStart\":0,"
 		"\"spectator\":true,\"humanSeat\":-1,\"joined\":false,\"isHost\":false,\"roomCode\":\"\",\"bots\":0,"
-		"\"minPlayers\":%d,\"maxPlayers\":%d,\"pace\":\"slow\",\"attemptSeconds\":10,\"sdAttemptSeconds\":6,"
+		"\"minPlayers\":%d,\"maxPlayers\":%d,\"pace\":\"slow\",\"attemptSeconds\":10,\"sdAttemptSeconds\":6,\"freeTime\":false,"
 		"\"turnMode\":\"simultaneous\",\"turnPlayer\":-1,\"turnNumber\":0,\"turnOrder\":[],\"secret\":null,"
 		"\"winner\":-1,\"alertPlayer\":-1,\"suddenDeathEnd\":0,\"players\":[],\"entries\":[],\"private\":[],\"events\":[]}",
 		Now, kMinPlayers, kMaxPlayers);
@@ -1206,10 +1256,17 @@ struct FRoomHub
 	std::map<std::string, std::string> TokenRoom;
 	std::string LastCookie;
 	int DefaultBots = 0;
+	// Valores de la linea de comandos con los que arranca cada sala nueva (el anfitrion puede cambiarlos despues).
+	double DefaultAttempt = 0;
+	bool DefaultFreeTime = false;
+	ETurnMode DefaultTurns = ETurnMode::Simultaneous;
 
 	FWebSession* NewRoom()
 	{
 		auto S = std::make_unique<FWebSession>();
+		S->SessionAttempt = DefaultAttempt;
+		S->SessionFreeTime = DefaultFreeTime;
+		S->SessionTurns = DefaultTurns;
 		S->OpenLobby(DefaultBots);
 		int Guard = 0;
 		while (ByCode.count(S->RoomCode) && Guard++ < 32) S->RoomCode = MakeRoomCode();
@@ -1400,9 +1457,12 @@ static int RunServe(int Port, int DefaultBots, const std::string& WebDir)
 
 	FRoomHub Hub;
 	Hub.DefaultBots = DefaultBots;
+	Hub.DefaultAttempt = (gAttemptSeconds >= 5 && gAttemptSeconds <= 60) ? gAttemptSeconds : 0;
+	Hub.DefaultFreeTime = gFreeTime;
+	Hub.DefaultTurns = gTurnMode;
 	std::vector<FSseClient> Sse;
 	std::printf("Picas y Famas sandbox web: http://127.0.0.1:%d/\n", Port);
-	std::printf("Salas bajo demanda · minimo %d, maximo %d jugadores\n", kMinPlayers, kMaxPlayers);
+	std::printf("Salas bajo demanda · minimo %d, maximo %d jugadores%s\n", kMinPlayers, kMaxPlayers, gFreeTime ? " · tiempo libre por defecto" : "");
 	std::printf("Crea sala en el navegador e invita con el enlace. Ctrl+C para parar.\n");
 	std::fflush(stdout);
 
@@ -1500,7 +1560,8 @@ int main(int Argc, char** Argv)
 		if (!std::strcmp(Argv[i], "--port") && i + 1 < Argc) { Port = std::atoi(Argv[++i]); bPortSet = true; continue; }
 		if (!std::strcmp(Argv[i], "--human")) { SetPace("normal"); continue; }
 		if (!std::strcmp(Argv[i], "--pace") && i + 1 < Argc) { SetPace(Argv[++i]); continue; }
-		if (!std::strcmp(Argv[i], "--attempt") && i + 1 < Argc) { gAttemptSeconds = std::atof(Argv[++i]); continue; }
+		if (!std::strcmp(Argv[i], "--attempt") && i + 1 < Argc) { ParseAttemptOption(Argv[++i], gAttemptSeconds, gFreeTime); continue; }
+		if (!std::strcmp(Argv[i], "--free")) { gFreeTime = true; gAttemptSeconds = 0; continue; }
 		if (!std::strcmp(Argv[i], "--turns") && i + 1 < Argc) { gTurnMode = ParseTurnMode(Argv[++i]); continue; }
 		if (!std::strcmp(Argv[i], "--decoy-cap") && i + 1 < Argc) { gDecoyCap = std::atoi(Argv[++i]); continue; }
 		Nums.push_back(std::atoi(Argv[i]));
@@ -1523,6 +1584,7 @@ int main(int Argc, char** Argv)
 		return RunServe(Port, Nums.size() > 0 ? std::max(0, std::min(6, Nums[0])) : 0, Dir + "/web");
 	}
 	std::printf("uso: pf_sandbox play [bots] [--seed N] | sim [partidas] [jugadores] [--seed N] [--quiet] | serve [bots] [--port P]\n");
+	std::printf("     opciones: --pace slow|normal|fast  --attempt N|free  --free  --turns simultaneous|seat|random  --decoy-cap N\n");
 	std::printf("     share.sh arranca serve + tunel gratis (Cloudflare) para jugar con amigos\n");
 	return 1;
 }

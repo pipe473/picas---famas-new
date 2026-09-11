@@ -55,8 +55,11 @@ export type GameState = {
   minPlayers: number;
   maxPlayers: number;
   pace: Pace;
+  /** Segundos por intento. 0 = tiempo libre (sin reloj). */
   attemptSeconds: number;
   sdAttemptSeconds: number;
+  /** Tiempo libre: sin reloj de intento, sin tope de ronda ni cuenta atrás de Muerte Sudada. */
+  freeTime: boolean;
   turnMode: TurnMode;
   turnPlayer: number;
   turnNumber: number;

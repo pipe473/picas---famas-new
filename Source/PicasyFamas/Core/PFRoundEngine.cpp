@@ -96,6 +96,17 @@ namespace PF
 		return N;
 	}
 
+	int32_t FRoundEngine::NumRemainingPlayers() const
+	{
+		int32_t N = 0;
+		for (int32_t i = 0; i < kMaxPlayers; ++i)
+		{
+			const FPlayerSlot& S = Players[i];
+			N += (S.bPresent && (S.bConnected || !S.bDropped)) ? 1 : 0;
+		}
+		return N;
+	}
+
 	// ------------------------------------------------------------------------------------------------
 	// Ronda
 	// ------------------------------------------------------------------------------------------------
@@ -141,7 +152,9 @@ namespace PF
 			S.LastAttemptTime = -1.0e9;
 			S.BestAttemptTime = 0.0;
 			// Simultaneo: todos los relojes arrancan ya. Por turnos: solo el de quien tenga el turno (AdvanceTurn).
-			S.AttemptDeadline = (!IsTurnBased() && S.bConnected) ? Now + Config.AttemptSeconds : 0.0;
+			// Con tiempo libre no arranca ninguno (ResetAttemptClock deja el reloj parado).
+			S.AttemptDeadline = 0.0;
+			if (!IsTurnBased() && S.bConnected) ResetAttemptClock(static_cast<uint8_t>(i), Now);
 		}
 
 		TurnCount = 0; TurnCursor = -1; CurrentTurn = kNoPlayer; TurnNumber = 0;
@@ -279,9 +292,14 @@ namespace PF
 		{
 			EndRound(ERoundEndReason::SuddenDeathExpired, Now);
 		}
-		else if (Now >= RoundStartTime + Config.RoundCapSeconds)
+		else if (Config.HasRoundCap() && Now >= RoundStartTime + Config.RoundCapSeconds)
 		{
 			EndRound(ERoundEndReason::TimeCap, Now);
+		}
+		else if (!Config.HasRoundCap() && NumPresentPlayers() > 0 && NumRemainingPlayers() == 0)
+		{
+			// Sin tope de tiempo, una mesa en la que todos se han caido (gracia agotada) no debe quedarse colgada.
+			EndRound(ERoundEndReason::NotEnoughPlayers, Now);
 		}
 	}
 
@@ -650,12 +668,15 @@ namespace PF
 
 	void FRoundEngine::ResetAttemptClock(uint8_t Player, double Now)
 	{
-		Players[Player].AttemptDeadline = Now + CurrentAttemptSeconds();
+		const double Seconds = CurrentAttemptSeconds();
+		Players[Player].AttemptDeadline = Seconds > 0.0 ? Now + Seconds : 0.0;   // 0 = reloj parado (tiempo libre)
 	}
 
 	double FRoundEngine::CurrentAttemptSeconds() const
 	{
-		return SuddenDeathEndTime > 0.0 ? Config.SuddenDeathAttemptSeconds : Config.AttemptSeconds;
+		if (!Config.HasAttemptClock()) return 0.0;
+		if (SuddenDeathEndTime > 0.0 && Config.SuddenDeathAttemptSeconds > 0.0) return Config.SuddenDeathAttemptSeconds;
+		return Config.AttemptSeconds;
 	}
 
 	void FRoundEngine::ProcessReveals(double Now)
@@ -687,23 +708,31 @@ namespace PF
 	void FRoundEngine::StartSuddenDeath(uint8_t TriggerPlayer, double Now)
 	{
 		AlertPlayer = TriggerPlayer;
-		SuddenDeathEndTime = Now + Config.SuddenDeathSeconds;
 
-		for (int32_t i = 0; i < kMaxPlayers; ++i)
+		// Sin cuenta atras configurada (tiempo libre) la alerta es solo informativa: ni reloj global ni relojes recortados.
+		const bool bTimed = Config.HasSuddenDeathTimer();
+		if (bTimed)
 		{
-			FPlayerSlot& S = Players[i];
-			if (!S.bPresent || !S.bConnected || S.bInactive || S.AttemptDeadline <= 0.0) continue;
-			const double Shorter = Now + Config.SuddenDeathAttemptSeconds;
-			if (S.AttemptDeadline > Shorter)
+			SuddenDeathEndTime = Now + Config.SuddenDeathSeconds;
+			for (int32_t i = 0; i < kMaxPlayers; ++i)
 			{
-				S.AttemptDeadline = Shorter;
-				EmitSimple(EEventType::PlayerStatsChanged, static_cast<uint8_t>(i), Now);
+				FPlayerSlot& S = Players[i];
+				if (!S.bPresent || !S.bConnected || S.bInactive || S.AttemptDeadline <= 0.0) continue;
+				const double Shorter = Now + Config.SuddenDeathAttemptSeconds;
+				if (S.AttemptDeadline > Shorter)
+				{
+					S.AttemptDeadline = Shorter;
+					EmitSimple(EEventType::PlayerStatsChanged, static_cast<uint8_t>(i), Now);
+				}
 			}
 		}
 
 		EmitSimple(EEventType::Alert, TriggerPlayer, Now);
-		FRoundEvent Ev; Ev.Type = EEventType::SuddenDeathStarted; Ev.Player = TriggerPlayer; Ev.Time = SuddenDeathEndTime;
-		Emit(Ev);
+		if (bTimed)
+		{
+			FRoundEvent Ev; Ev.Type = EEventType::SuddenDeathStarted; Ev.Player = TriggerPlayer; Ev.Time = SuddenDeathEndTime;
+			Emit(Ev);
+		}
 	}
 
 	// ------------------------------------------------------------------------------------------------
