@@ -93,8 +93,14 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "PicasyFamas")
 	float RoundStartServerTime = 0.f;
 
+	// 0 = sin tope de ronda (tiempo libre).
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "PicasyFamas")
 	float RoundCapServerTime = 0.f;
+
+	// Tiempo libre: nadie tiene reloj de intento (AttemptDeadlineServerTime siempre 0), no hay tope de ronda y la
+	// alerta de N-1 Famas no lanza Muerte Sudada. La UI oculta arcos de reloj y cuentas atras.
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "PicasyFamas")
+	bool bFreeTime = false;
 
 	// 0 = Muerte Sudada inactiva.
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "PicasyFamas")

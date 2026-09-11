@@ -152,7 +152,8 @@ void APFGameMode::StartRound(double Now)
 	GS->CodeLength = static_cast<uint8>(Config.CodeLength);
 	GS->bTeamMode = Config.bTeamMode;
 	GS->RoundStartServerTime = static_cast<float>(Now);
-	GS->RoundCapServerTime = static_cast<float>(Now + Config.RoundCapSeconds);
+	GS->RoundCapServerTime = Config.HasRoundCap() ? static_cast<float>(Now + Config.RoundCapSeconds) : 0.f;   // 0 = sin tope (tiempo libre)
+	GS->bFreeTime = Config.IsFreeTime();
 	GS->RevealedCode = -1;
 	GS->LastRoundEndReason = EPFRoundEndReason::None;
 	GS->LastRoundWinnerMask = 0;

@@ -44,6 +44,7 @@ void APFGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(APFGameState, bTeamMode);
 	DOREPLIFETIME(APFGameState, RoundStartServerTime);
 	DOREPLIFETIME(APFGameState, RoundCapServerTime);
+	DOREPLIFETIME(APFGameState, bFreeTime);
 	DOREPLIFETIME(APFGameState, SuddenDeathEndServerTime);
 	DOREPLIFETIME(APFGameState, AlertPlayerIndex);
 	DOREPLIFETIME(APFGameState, TurnMode);
