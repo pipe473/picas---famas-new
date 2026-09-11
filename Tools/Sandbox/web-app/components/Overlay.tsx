@@ -5,7 +5,7 @@ import { sfx } from "@/lib/audio";
 import { abortMatch, configRoom, createRoom, goHome, joinRoom, roomCodeFromUrl, setToken, startMatch, startSolo } from "@/lib/api";
 import { useNow } from "@/lib/clock";
 import { ShareInvite } from "@/components/ShareInvite";
-import { RankHead, RoomRanking, SoloRanking } from "@/components/Ranking";
+import { RankHead, RankingTabs, RoomRanking, SoloRanking } from "@/components/Ranking";
 import { TrophyIcon } from "@/components/Icons";
 import { COLORS, type GameState, type Pace, type TurnMode } from "@/lib/types";
 
@@ -106,7 +106,7 @@ const Summary = memo(function Summary({ S }: { S: GameState }) {
   );
 });
 
-const MatchEnd = memo(function MatchEnd({ S, onAgain }: { S: GameState; onAgain: () => void }) {
+const MatchEnd = memo(function MatchEnd({ S, onAgain, onRanking }: { S: GameState; onAgain: () => void; onRanking: () => void }) {
   const order = [...S.players].sort((a, b) => b.matchScore - a.matchScore);
   const pod = [order[1], order[0], order[2]];
   return (
@@ -154,6 +154,16 @@ const MatchEnd = memo(function MatchEnd({ S, onAgain }: { S: GameState; onAgain:
         <div className="rank-block">
           <RankHead sub={`${S.roomMatches} ${S.roomMatches === 1 ? "partida" : "partidas"}`}>Clasificación de la sala</RankHead>
           <RoomRanking S={S} />
+        </div>
+      ) : null}
+      {S.globalRank > 0 ? (
+        <div className="rank-global-line">
+          <span>
+            Ranking global: puesto <b>#{S.globalRank}</b> de {S.globalTotal} {S.globalTotal === 1 ? "jugador" : "jugadores"}
+          </span>
+          <button type="button" className="linkish" onClick={onRanking}>
+            Ver rankings
+          </button>
         </div>
       ) : null}
       {S.isHost ? (
@@ -335,15 +345,14 @@ function Join({ S }: { S: GameState }) {
         <div className={`rank-block${showRank ? " open" : ""}`}>
           <button type="button" className="rank-toggle" aria-expanded={showRank} aria-controls="home-rank" onClick={() => setShowRank((v) => !v)}>
             <TrophyIcon />
-            Ranking individual
+            Rankings
             <svg className="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="m6 9 6 6 6-6" />
             </svg>
           </button>
           {showRank ? (
             <div id="home-rank">
-              <p className="sub rank-note">Las mejores partidas contra bots. Cada partida cuenta tres rondas.</p>
-              <SoloRanking limit={10} />
+              <RankingTabs S={S} />
             </div>
           ) : null}
         </div>
@@ -576,7 +585,7 @@ function Lobby({ S }: { S: GameState }) {
   );
 }
 
-export const Overlay = memo(function Overlay({ S }: { S: GameState }) {
+export const Overlay = memo(function Overlay({ S, onRanking }: { S: GameState; onRanking: () => void }) {
   if (S.joined && S.phase === "playing") return null;
   return (
     <div className="overlay on">
@@ -588,6 +597,7 @@ export const Overlay = memo(function Overlay({ S }: { S: GameState }) {
         {S.joined && S.phase === "matchend" ? (
           <MatchEnd
             S={S}
+            onRanking={onRanking}
             onAgain={async () => {
               await startMatch();
             }}
