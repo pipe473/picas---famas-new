@@ -18,6 +18,7 @@ PF::FRoundConfig UPFTuningDataAsset::ToRoundConfig(int32 NumPlayers, bool bTeamM
 	C.PassesUntilInactive       = static_cast<uint8_t>(FMath::Clamp(PassesUntilInactive, 0, 255));
 	C.bTeamMode                 = bTeamMode;
 	C.TurnMode                  = static_cast<PF::ETurnMode>(TurnMode);
+	if (bFreeTime) C = C.MakeFreeTime();   // relojes a 0: ver PF::FRoundConfig
 
 	PF::FScoringConfig& S = C.Scoring;
 	S.Solve              = SolvePoints;

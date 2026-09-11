@@ -65,9 +65,14 @@ claves: sin sesión en Spotify se oyen 30 s por tema; iniciando sesión desde el
   entran con el mismo nombre, al segundo se le añade un sufijo (`Bea 2`) para que no se fundan en la tabla.
 
 Comandos en partida: `1234` intento · `e1234` encriptar · `d1234 2 1` señuelo (finge 2F 1P) · `s 12` sospechar de #12 · `q` salir.
-Opciones: `--seed N`, `--pace slow|normal|fast`, `--attempt N` (segundos por intento), `--turns simultaneous|seat|random`
-(por turnos, el cronómetro corre solo para quien tiene el turno; `random` baraja el orden en cada ronda), `--decoy-cap N`,
-`--data DIR` (directorio de datos del ranking en `serve`).
+Opciones: `--seed N`, `--pace slow|normal|fast`, `--attempt N|free` (segundos por intento; `free` = **tiempo libre**),
+`--turns simultaneous|seat|random` (por turnos, el cronómetro corre solo para quien tiene el turno; `random` baraja el
+orden en cada ronda), `--decoy-cap N`, `--data DIR` (directorio de datos del ranking en `serve`).
+
+**Tiempo libre** (`--attempt free` o `--free`; en el HUD web, *Reloj → Libre (sin reloj)*): nadie tiene reloj de intento,
+cada cual tira cuando quiere y, por turnos, el turno dura hasta que su dueño envía. No hay Pasos por expiración, la ronda
+no tiene tope de tiempo (solo acaba por acierto) y la alerta de N-1 Famas se muestra pero sin Muerte Sudada cronometrada.
+Los bots se imponen un ritmo propio (~10 s) para no bloquear la mesa.
 
 ## Requisitos
 

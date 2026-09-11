@@ -85,6 +85,21 @@ Reglas del turno:
 
 El servidor emite `TurnChanged(Player, TurnNumber, Deadline)`; `APFGameState` replica `TurnMode`, `TurnPlayerIndex`, `TurnNumber` y `TurnOrder`, y el reloj del turno viaja en el `AttemptDeadlineServerTime` del `PlayerState` correspondiente.
 
+#### 1.2.2 Variante «Tiempo libre» (opcional, combinable con cualquier modo de turnos)
+
+Para mesas que no quieren cronómetro, la sala puede activar el **tiempo libre** (`UPFTuningDataAsset::bFreeTime`; en el sandbox `--attempt free` o *Reloj → Libre* en el HUD web). En el motor equivale a `FRoundConfig::MakeFreeTime()`: `AttemptSeconds`, `SuddenDeathSeconds` y `RoundCapSeconds` a 0. Cada uno de los tres relojes es independiente (`<= 0` lo desactiva), pero la variante los quita todos porque un tope de 120 s o una Muerte Sudada de 20 s no tienen sentido cuando nadie tiene prisa.
+
+| Regla | Con reloj (por defecto) | Tiempo libre |
+|---|---|---|
+| Reloj de intento | 10 s (6 s en Muerte Sudada), se reinicia con cada intento / turno | **No hay**: `AttemptDeadline = 0` siempre. Nadie recibe `DeadlineExpired` |
+| Paso e Inactivo | Reloj expirado → Paso (−5); 2 seguidos → Inactivo | No existen por expiración (un desconectado sigue saltándose) |
+| Turno (`SeatOrder` / `RandomOrder`) | Se consume con intento **o** Paso | Solo se consume con un **intento** (o al desconectarse su dueño): el turno dura lo que quiera quien lo tiene |
+| Alerta N-1 Famas | Muerte Sudada: 20 s globales, relojes a 6 s | Se emite `Alert` (la UI avisa), pero **sin** `SuddenDeathStarted` ni cuenta atrás |
+| Fin de ronda | Acierto, Muerte Sudada expirada o cap de 120 s | **Solo acierto**. Salvaguarda: si todos los presentes se caen y agotan la gracia de reconexión, la ronda acaba por `NotEnoughPlayers` |
+| Puntuación | — | Igual (combos Relámpago/Rápida siguen midiendo segundos desde la Pista Clave) |
+
+`APFGameState` replica `bFreeTime` y `RoundCapServerTime = 0`; la UI oculta arcos de reloj y cuentas atrás. Los bots del sandbox se imponen un ritmo propio (~10 s, `kBotSelfClockSeconds`) para que la mesa no dependa de un Cerrador que solo tira con ≤ 2 candidatos.
+
 ### 1.3 Faroleo y Ocultación
 
 Cada jugador dispone por ronda de **1 ficha de Encriptar** y **1 ficha de Señuelo** (en Equipos, las fichas son del equipo, ver §1.4). No se recargan: gastarlas pronto es perder una herramienta para la Muerte Sudada.

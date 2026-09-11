@@ -94,6 +94,12 @@ namespace PF
 		double  FastWindow         = 6.0;
 	};
 
+	// Relojes: cualquier valor <= 0 desactiva ese reloj.
+	//   AttemptSeconds <= 0      -> "tiempo libre": nadie tiene reloj de intento; no hay Pasos por expiracion
+	//                               (ni Inactivos por ellos) y, por turnos, el turno dura hasta que su dueno tira.
+	//   SuddenDeathSeconds <= 0  -> la alerta de N-1 Famas se emite pero sin cuenta atras ni relojes recortados.
+	//   RoundCapSeconds <= 0     -> la ronda no tiene tope: solo acaba por acierto (o si todos se caen).
+	// MakeFreeTime() aplica los tres a la vez, que es lo que espera una mesa "sin prisas".
 	struct FRoundConfig
 	{
 		int32_t CodeLength                = 4;
@@ -112,6 +118,21 @@ namespace PF
 		bool    bTeamMode                 = false;
 		ETurnMode TurnMode                = ETurnMode::Simultaneous;
 		FScoringConfig Scoring;
+
+		bool HasAttemptClock() const     { return AttemptSeconds > 0.0; }
+		bool HasSuddenDeathTimer() const { return SuddenDeathSeconds > 0.0; }
+		bool HasRoundCap() const         { return RoundCapSeconds > 0.0; }
+		bool IsFreeTime() const          { return !HasAttemptClock(); }
+
+		// Misma configuracion sin ningun reloj: tiempo libre entre tiro y tiro.
+		FRoundConfig MakeFreeTime() const
+		{
+			FRoundConfig C = *this;
+			C.AttemptSeconds = 0.0;
+			C.SuddenDeathSeconds = 0.0;
+			C.RoundCapSeconds = 0.0;
+			return C;
+		}
 	};
 
 	struct FPlayerSlot
