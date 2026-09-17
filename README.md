@@ -72,6 +72,14 @@ claves: sin sesión en Spotify se oyen 30 s por tema; iniciando sesión desde el
 `GET /api/ranking?limit=N&id=I&name=X` expone los dos rankings persistentes en JSON: `solo` (con `mine` si `id`
 coincide con una partida) y `global` (con `me` si `name` coincide con un jugador).
 
+**Agendar partida.** Desde la pantalla de inicio, *Agendar partida* propone una fecha y hora y genera un enlace
+`?cita=CODE` para compartir (WhatsApp, Telegram, copiar…). Quien abre el enlace puede **aceptar** o **rechazar**;
+en ambos casos el anfitrión recibe un aviso in-app (toast por SSE) y quien responde también. La primera aceptación
+abre una sala con el anfitrión sentado; el resto de quienes aceptaron entran con *Entrar a la sala*. Cancelar la
+cita avisa a quienes ya habían aceptado. Las citas viven en memoria del servidor (como las salas): se pierden al
+reiniciar. APIs: `GET /api/schedule/create?name=&when=`, `GET /api/schedule/respond?code=&name=&decision=approve|reject`,
+`GET /api/schedule/cancel`, `GET /api/notify/ack?id=` (el estado incluye `schedule` y `notifications`).
+
 Comandos en partida: `1234` intento · `e1234` encriptar · `d1234 2 1` señuelo (finge 2F 1P) · `s 12` sospechar de #12 · `q` salir.
 Opciones: `--seed N`, `--pace slow|normal|fast`, `--attempt N|free` (segundos por intento; `free` = **tiempo libre**),
 `--turns simultaneous|seat|random` (por turnos, el cronómetro corre solo para quien tiene el turno; `random` baraja el

@@ -10,7 +10,7 @@ import { PlayerList } from "@/components/PlayerList";
 import { RankingDialog } from "@/components/Ranking";
 import { SoundDock } from "@/components/SoundDock";
 import { Toasts } from "@/components/Toasts";
-import { fetchState, getToken, startMatch, streamUrl, suspect } from "@/lib/api";
+import { ackNotification, fetchState, getToken, startMatch, streamUrl, suspect } from "@/lib/api";
 import { sfx } from "@/lib/audio";
 import { syncClock } from "@/lib/clock";
 import type { GameState, ToastItem } from "@/lib/types";
@@ -22,6 +22,7 @@ export default function Game() {
   const openRank = useCallback(() => setRankOpen(true), []);
   const closeRank = useCallback(() => setRankOpen(false), []);
   const knownEv = useRef(new Set<number>());
+  const knownNotes = useRef(new Set<number>());
   const first = useRef(true);
   const toastId = useRef(0);
   const token = typeof window !== "undefined" ? getToken() : "";
@@ -57,6 +58,17 @@ export default function Game() {
       } else {
         for (const e of st.events) knownEv.current.add(e.id);
         first.current = false;
+      }
+
+      // Notificaciones de cita (aceptada / rechazada / cancelada): toast + acuse para no repetirlas.
+      for (const n of st.notifications ?? []) {
+        if (knownNotes.current.has(n.id)) continue;
+        knownNotes.current.add(n.id);
+        const cls = n.kind === "gold" || n.kind === "bad" || n.kind === "info" ? n.kind : "info";
+        if (cls === "bad") sfx.bad();
+        else if (cls === "gold") sfx.fama();
+        pushToast({ text: n.text, cls });
+        void ackNotification(n.id);
       }
     },
     [pushToast],

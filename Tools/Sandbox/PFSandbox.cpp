@@ -1015,6 +1015,12 @@ struct FGlobalRanking
 
 static FGlobalRanking gGlobalRanking;
 
+static std::string NormCode(std::string S)
+{
+	for (char& C : S) C = char(std::toupper((unsigned char)C));
+	return S;
+}
+
 // GET /api/ranking?limit=N&id=I&name=X  ->  { total, solo[], mine, globalTotal, global[], me }
 static std::string RankingApiJson(const std::map<std::string, std::string>& Q)
 {
@@ -1027,6 +1033,193 @@ static std::string RankingApiJson(const std::map<std::string, std::string>& Q)
 	gGlobalRanking.AppendApi(J, Limit, Name);
 	J.back() = '}';
 	return J;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Citas (agendar partida) + notificaciones in-app. En memoria, como las salas: el anfitrion propone
+// fecha/hora, comparte el enlace (?cita=CODE) y cada amigo aprueba o rechaza. En ambos casos el
+// anfitrion (y quien responde) reciben un aviso por SSE en /api/state.
+// ------------------------------------------------------------------------------------------------
+
+static std::string FormatWhen(int64_t Ts)
+{
+	const std::time_t T = (std::time_t)Ts;
+	std::tm Local{};
+#if defined(_WIN32)
+	localtime_s(&Local, &T);
+#else
+	localtime_r(&T, &Local);
+#endif
+	char Buf[48];
+	std::snprintf(Buf, sizeof Buf, "%02d/%02d a las %02d:%02d", Local.tm_mday, Local.tm_mon + 1, Local.tm_hour, Local.tm_min);
+	return Buf;
+}
+
+struct FNote
+{
+	int Id = 0;
+	std::string Text;
+	std::string Kind;   // gold | bad | info
+	int64_t Ts = 0;
+};
+
+struct FNotifyStore
+{
+	int NextId = 1;
+	std::map<std::string, std::vector<FNote>> ByToken;
+
+	void Push(const std::string& Token, const std::string& Text, const std::string& Kind)
+	{
+		if (Token.empty() || Text.empty()) return;
+		FNote N;
+		N.Id = NextId++;
+		N.Text = Text;
+		N.Kind = Kind.empty() ? "info" : Kind;
+		N.Ts = (int64_t)std::time(nullptr);
+		ByToken[Token].push_back(N);
+		auto& V = ByToken[Token];
+		if (V.size() > 30) V.erase(V.begin(), V.begin() + (V.size() - 30));
+	}
+
+	std::string JsonArray(const std::string& Token) const
+	{
+		std::string J = "[";
+		auto It = ByToken.find(Token);
+		if (It == ByToken.end()) return J + "]";
+		char Buf[512];
+		for (size_t i = 0; i < It->second.size(); ++i)
+		{
+			const FNote& N = It->second[i];
+			std::snprintf(Buf, sizeof Buf, "%s{\"id\":%d,\"text\":%s,\"kind\":%s,\"ts\":%lld}",
+				i ? "," : "", N.Id, JsonStr(N.Text).c_str(), JsonStr(N.Kind).c_str(), (long long)N.Ts);
+			J += Buf;
+		}
+		return J + "]";
+	}
+
+	void Ack(const std::string& Token, int Id)
+	{
+		auto It = ByToken.find(Token);
+		if (It == ByToken.end()) return;
+		if (Id <= 0) { ByToken.erase(It); return; }
+		auto& V = It->second;
+		V.erase(std::remove_if(V.begin(), V.end(), [Id](const FNote& N) { return N.Id == Id; }), V.end());
+		if (V.empty()) ByToken.erase(It);
+	}
+};
+
+static FNotifyStore gNotify;
+
+struct FSchedGuest
+{
+	std::string Token, Name;
+	std::string Decision;   // "" | "approved" | "rejected"
+	int64_t At = 0;
+};
+
+struct FSchedule
+{
+	std::string Code;
+	std::string HostToken, HostName;
+	int64_t When = 0;
+	std::string Status;     // open | ready | cancelled
+	std::string RoomCode;
+	int64_t CreatedAt = 0;
+	std::vector<FSchedGuest> Guests;
+
+	FSchedGuest* FindGuest(const std::string& Token)
+	{
+		for (auto& G : Guests) if (G.Token == Token) return &G;
+		return nullptr;
+	}
+	const FSchedGuest* FindGuest(const std::string& Token) const
+	{
+		for (const auto& G : Guests) if (G.Token == Token) return &G;
+		return nullptr;
+	}
+};
+
+struct FScheduleStore
+{
+	std::map<std::string, FSchedule> ByCode;
+	std::map<std::string, std::string> TokenCode;
+
+	FSchedule* Find(const std::string& Code)
+	{
+		auto It = ByCode.find(NormCode(Code));
+		return It == ByCode.end() ? nullptr : &It->second;
+	}
+	const FSchedule* Find(const std::string& Code) const
+	{
+		auto It = ByCode.find(NormCode(Code));
+		return It == ByCode.end() ? nullptr : &It->second;
+	}
+	FSchedule* FindByToken(const std::string& Token)
+	{
+		if (Token.empty()) return nullptr;
+		auto It = TokenCode.find(Token);
+		if (It == TokenCode.end()) return nullptr;
+		return Find(It->second);
+	}
+	const FSchedule* FindByToken(const std::string& Token) const
+	{
+		if (Token.empty()) return nullptr;
+		auto It = TokenCode.find(Token);
+		if (It == TokenCode.end()) return nullptr;
+		return Find(It->second);
+	}
+
+	void BindToken(const std::string& Token, const std::string& Code)
+	{
+		if (!Token.empty()) TokenCode[Token] = NormCode(Code);
+	}
+
+	std::string MakeCode() const
+	{
+		for (int i = 0; i < 48; ++i)
+		{
+			const std::string C = MakeRoomCode();
+			if (!ByCode.count(C)) return C;
+		}
+		return MakeRoomCode() + MakeRoomCode().substr(0, 2);
+	}
+
+	// Vista publica/privada de la cita para el estado SSE. CitaQuery gana si se pide una concreta.
+	std::string JsonFor(const std::string& Token, const std::string& CitaQuery) const
+	{
+		const FSchedule* S = nullptr;
+		if (!CitaQuery.empty()) S = Find(CitaQuery);
+		if (!S) S = FindByToken(Token);
+		if (!S) return "null";
+		const bool bHost = !Token.empty() && Token == S->HostToken;
+		const FSchedGuest* Me = S->FindGuest(Token);
+		std::string J = "{";
+		char Buf[384];
+		std::snprintf(Buf, sizeof Buf,
+			"\"code\":%s,\"hostName\":%s,\"when\":%lld,\"status\":%s,\"roomCode\":%s,\"isHost\":%s,\"myDecision\":%s,\"createdAt\":%lld,",
+			JsonStr(S->Code).c_str(), JsonStr(S->HostName).c_str(), (long long)S->When, JsonStr(S->Status).c_str(),
+			JsonStr(S->RoomCode).c_str(), bHost ? "true" : "false",
+			JsonStr(Me ? Me->Decision : std::string()).c_str(), (long long)S->CreatedAt);
+		J += Buf;
+		J += "\"guests\":[";
+		for (size_t i = 0; i < S->Guests.size(); ++i)
+		{
+			const FSchedGuest& G = S->Guests[i];
+			// El anfitrion ve todas las respuestas; el resto solo nombres y decision (sin tokens).
+			std::snprintf(Buf, sizeof Buf, "%s{\"name\":%s,\"decision\":%s,\"at\":%lld}",
+				i ? "," : "", JsonStr(G.Name).c_str(), JsonStr(G.Decision).c_str(), (long long)G.At);
+			J += Buf;
+		}
+		J += "]}";
+		return J;
+	}
+};
+
+static FScheduleStore gSchedules;
+
+static std::string AppendNotifsAndSchedule(const std::string& Token, const std::string& Cita)
+{
+	return "\"notifications\":" + gNotify.JsonArray(Token) + ",\"schedule\":" + gSchedules.JsonFor(Token, Cita);
 }
 
 struct FWebSession
@@ -1326,7 +1519,7 @@ struct FWebSession
 		J += "\"globalRank\":" + std::to_string(You ? gGlobalRanking.PosOf(You->Name) : 0) + ",\"globalTotal\":" + std::to_string(gGlobalRanking.Entries.size()) + ",";
 	}
 
-	std::string StateJson(double Now, const std::string& Token) const
+	std::string StateJson(double Now, const std::string& Token, const std::string& Cita = "") const
 	{
 		ApplyGlobals();
 		const FClient* You = FindClient(Token);
@@ -1356,7 +1549,9 @@ struct FWebSession
 					(Humans + i) ? "," : "", Seat, JsonStr(kFirstNames[Seat % 8]).c_str(), ProfileName(kBotRotation[i % 4]));
 				J += Buf;
 			}
-			J += "],\"entries\":[],\"private\":[],\"events\":[]}";
+			J += "],\"entries\":[],\"private\":[],\"events\":[],";
+			J += AppendNotifsAndSchedule(Token, Cita);
+			J += "}";
 			return J;
 		}
 
@@ -1415,18 +1610,20 @@ struct FWebSession
 		{
 			J += (i ? "," : "") + std::string("{\"id\":") + std::to_string(T->Log[i].Id) + ",\"text\":" + JsonStr(T->Log[i].Text) + "}";
 		}
-		J += "]}";
+		J += "],";
+		J += AppendNotifsAndSchedule(Token, Cita);
+		J += "}";
 		return J;
 	}
 
-	std::string HandleApi(const std::string& Path, const std::map<std::string, std::string>& Q, const std::string& TokenIn, double Now)
+	std::string HandleApi(const std::string& Path, const std::map<std::string, std::string>& Q, const std::string& TokenIn, double Now, const std::string& Cita = "")
 	{
 		ApplyGlobals();
 		PendingSetCookie.clear();
 		const std::string Token = Q.count("token") ? Q.at("token") : TokenIn;
 		FClient* You = FindClient(Token);
 
-		if (Path == "/api/state" || Path == "/api/stream") return StateJson(Now, Token);
+		if (Path == "/api/state" || Path == "/api/stream") return StateJson(Now, Token, Cita);
 
 		if (Path == "/api/join")
 		{
@@ -1578,24 +1775,18 @@ struct FWebSession
 	}
 };
 
-static std::string NormCode(std::string S)
+static std::string LandingJson(double Now, const std::string& Token = "", const std::string& Cita = "")
 {
-	for (char& C : S) C = char(std::toupper((unsigned char)C));
-	return S;
-}
-
-static std::string LandingJson(double Now)
-{
-	char Buf[768];
+	char Buf[640];
 	std::snprintf(Buf, sizeof Buf,
 		"{\"phase\":\"none\",\"round\":1,\"rounds\":3,\"len\":4,\"now\":%.3f,\"phaseEnd\":0,\"roundStart\":0,"
 		"\"spectator\":true,\"humanSeat\":-1,\"joined\":false,\"isHost\":false,\"roomCode\":\"\",\"bots\":0,"
 		"\"minPlayers\":%d,\"maxPlayers\":%d,\"pace\":\"slow\",\"attemptSeconds\":10,\"sdAttemptSeconds\":6,\"freeTime\":false,"
 		"\"turnMode\":\"simultaneous\",\"solo\":false,\"soloRank\":0,\"soloId\":0,\"roomMatches\":0,\"roomRanking\":[],\"globalRank\":0,\"globalTotal\":0,"
 		"\"turnPlayer\":-1,\"turnNumber\":0,\"turnOrder\":[],\"secret\":null,"
-		"\"winner\":-1,\"alertPlayer\":-1,\"suddenDeathEnd\":0,\"players\":[],\"entries\":[],\"private\":[],\"events\":[]}",
+		"\"winner\":-1,\"alertPlayer\":-1,\"suddenDeathEnd\":0,\"players\":[],\"entries\":[],\"private\":[],\"events\":[],",
 		Now, kMinPlayers, kMaxPlayers);
-	return Buf;
+	return std::string(Buf) + AppendNotifsAndSchedule(Token, Cita) + "}";
 }
 
 struct FRoomHub
@@ -1660,32 +1851,154 @@ struct FRoomHub
 		LastCookie.clear();
 		if (Path == "/api/ranking") return RankingApiJson(Q);
 		if (Q.count("code")) Q["code"] = NormCode(Q["code"]);
+		const std::string Cita = Q.count("cita") ? NormCode(Q.at("cita")) : "";
+
+		if (Path == "/api/notify/ack")
+		{
+			if (Token.empty()) return "{\"ok\":false,\"error\":\"sin sesion\"}";
+			const int Id = Q.count("id") ? std::atoi(Q.at("id").c_str()) : 0;
+			gNotify.Ack(Token, Id);
+			return "{\"ok\":true}";
+		}
+
+		if (Path == "/api/schedule/create")
+		{
+			const std::string Name = SanitizeName(Q.count("name") ? Q.at("name") : "");
+			const int64_t When = Q.count("when") ? std::strtoll(Q.at("when").c_str(), nullptr, 10) : 0;
+			const int64_t NowTs = (int64_t)std::time(nullptr);
+			if (When < NowTs - 60) return "{\"ok\":false,\"error\":\"elige una hora futura\"}";
+			if (When > NowTs + 60LL * 60 * 24 * 30) return "{\"ok\":false,\"error\":\"como maximo a 30 dias\"}";
+			std::string HostTok = Token;
+			if (HostTok.empty()) HostTok = RandomToken();
+			// Si el token ya esta en una sala, no lo reutilizamos: la cita es independiente.
+			if (TokenRoom.count(HostTok)) HostTok = RandomToken();
+			FSchedule S;
+			S.Code = gSchedules.MakeCode();
+			S.HostToken = HostTok;
+			S.HostName = Name;
+			S.When = When;
+			S.Status = "open";
+			S.CreatedAt = NowTs;
+			gSchedules.ByCode[S.Code] = S;
+			gSchedules.BindToken(HostTok, S.Code);
+			LastCookie = HostTok;
+			return "{\"ok\":true,\"token\":" + JsonStr(HostTok) + ",\"code\":" + JsonStr(S.Code) +
+				",\"when\":" + std::to_string((long long)When) + ",\"status\":\"open\"}";
+		}
+
+		if (Path == "/api/schedule/cancel")
+		{
+			FSchedule* S = gSchedules.FindByToken(Token);
+			if (!S || S->HostToken != Token) return "{\"ok\":false,\"error\":\"solo el anfitrion puede cancelar\"}";
+			if (S->Status == "cancelled") return "{\"ok\":true,\"status\":\"cancelled\"}";
+			S->Status = "cancelled";
+			const std::string WhenTxt = FormatWhen(S->When);
+			for (const auto& G : S->Guests)
+			{
+				if (G.Decision == "rejected") continue;
+				gNotify.Push(G.Token, S->HostName + " cancelo la partida del " + WhenTxt, "bad");
+			}
+			return "{\"ok\":true,\"status\":\"cancelled\"}";
+		}
+
+		if (Path == "/api/schedule/respond")
+		{
+			const std::string Code = Q.count("code") ? NormCode(Q.at("code")) : Cita;
+			FSchedule* S = gSchedules.Find(Code);
+			if (!S) return "{\"ok\":false,\"error\":\"esa cita no existe\"}";
+			if (S->Status == "cancelled") return "{\"ok\":false,\"error\":\"esta cita esta cancelada\"}";
+			std::string Decision = Q.count("decision") ? Q.at("decision") : "";
+			for (char& C : Decision) C = char(std::tolower((unsigned char)C));
+			if (Decision == "accept") Decision = "approve";
+			if (Decision == "deny" || Decision == "decline") Decision = "reject";
+			if (Decision != "approve" && Decision != "reject") return "{\"ok\":false,\"error\":\"decision: approve o reject\"}";
+			if (!Token.empty() && Token == S->HostToken) return "{\"ok\":false,\"error\":\"no puedes responder a tu propia cita\"}";
+
+			std::string GuestTok = Token;
+			if (GuestTok.empty() || GuestTok == S->HostToken || TokenRoom.count(GuestTok)) GuestTok = RandomToken();
+			const std::string GuestName = SanitizeName(Q.count("name") ? Q.at("name") : "");
+			FSchedGuest* G = S->FindGuest(GuestTok);
+			if (!G)
+			{
+				// Mismo nombre que ya respondio con otro token: reutiliza esa fila si aun no decidio en firme.
+				for (auto& X : S->Guests)
+				{
+					if (X.Name == GuestName && X.Decision.empty()) { G = &X; G->Token = GuestTok; break; }
+				}
+			}
+			if (!G)
+			{
+				S->Guests.push_back(FSchedGuest{});
+				G = &S->Guests.back();
+				G->Token = GuestTok;
+				G->Name = GuestName;
+			}
+			else if (!GuestName.empty()) G->Name = GuestName;
+			if (G->Name.empty()) G->Name = "Jugador";
+			if (!G->Decision.empty()) return "{\"ok\":false,\"error\":\"ya respondiste a esta cita\"}";
+
+			G->Decision = Decision == "approve" ? "approved" : "rejected";
+			G->At = (int64_t)std::time(nullptr);
+			gSchedules.BindToken(GuestTok, S->Code);
+			LastCookie = GuestTok;
+
+			const std::string WhenTxt = FormatWhen(S->When);
+			if (Decision == "approve")
+			{
+				if (S->Status == "open" || S->RoomCode.empty())
+				{
+					FWebSession* R = NewRoom();
+					FWebSession::FClient C;
+					C.Token = S->HostToken;
+					C.Name = S->HostName;
+					C.bHost = true;
+					C.Seat = -1;
+					R->Clients.push_back(C);
+					R->ClampBots();
+					S->RoomCode = R->RoomCode;
+					S->Status = "ready";
+					Track(R);
+				}
+				gNotify.Push(S->HostToken, G->Name + " ha aceptado tu partida del " + WhenTxt, "gold");
+				gNotify.Push(GuestTok, "Has aceptado la partida con " + S->HostName + " del " + WhenTxt, "gold");
+			}
+			else
+			{
+				gNotify.Push(S->HostToken, G->Name + " ha rechazado tu partida del " + WhenTxt, "bad");
+				gNotify.Push(GuestTok, "Has rechazado la partida con " + S->HostName + " del " + WhenTxt, "info");
+			}
+			return "{\"ok\":true,\"token\":" + JsonStr(GuestTok) + ",\"code\":" + JsonStr(S->Code) +
+				",\"status\":" + JsonStr(S->Status) + ",\"decision\":" + JsonStr(G->Decision) +
+				",\"roomCode\":" + JsonStr(S->RoomCode) + "}";
+		}
+
 		const bool bHasCode = Q.count("code") && !Q["code"].empty();
 		if (Path == "/api/solo" || Path == "/api/create" || (Path == "/api/join" && !bHasCode))
 		{
 			FWebSession* R = NewRoom();
 			const std::string P = (Path == "/api/create") ? "/api/join" : Path;
-			std::string Body = R->HandleApi(P, Q, "", Now);
+			std::string Body = R->HandleApi(P, Q, "", Now, Cita);
 			Track(R);
 			return Body;
 		}
 		FWebSession* R = Find(Token, Q);
 		if (!R)
 		{
-			if (Path == "/api/state" || Path == "/api/stream") return LandingJson(Now);
+			if (Path == "/api/state" || Path == "/api/stream") return LandingJson(Now, Token, Cita);
 			// Cookie/token de una instancia anterior (Render se duerme): crear sala nueva.
 			if (Path == "/api/join" && !bHasCode)
 			{
 				R = NewRoom();
-				std::string Body = R->HandleApi("/api/join", Q, "", Now);
+				std::string Body = R->HandleApi("/api/join", Q, "", Now, Cita);
 				Track(R);
 				return Body;
 			}
 			if (Path == "/api/join") return "{\"ok\":false,\"error\":\"esa sala no existe\"}";
+			if (Path.rfind("/api/schedule/", 0) == 0) return "{\"ok\":false,\"error\":\"cita no encontrada\"}";
 			return "{\"ok\":false,\"error\":\"crea una sala o entra con el enlace\"}";
 		}
 		const std::string Code = R->RoomCode;
-		std::string Body = R->HandleApi(Path, Q, Token, Now);
+		std::string Body = R->HandleApi(Path, Q, Token, Now, Cita);
 		if (Path == "/api/leave")
 		{
 			TokenRoom.erase(Token);
@@ -1768,7 +2081,7 @@ static std::string ServeStatic(const std::string& WebDir, std::string Path)
 	return ReadFile(WebDir + Path);
 }
 
-struct FSseClient { int Fd; std::string Token; };
+struct FSseClient { int Fd; std::string Token; std::string Cita; };
 
 static bool SendSse(int Fd, const std::string& Json)
 {
@@ -1828,7 +2141,9 @@ static int RunServe(int Port, int DefaultBots, const std::string& WebDir)
 			LastSse = Now;
 			for (size_t i = 0; i < Sse.size();)
 			{
-				if (!SendSse(Sse[i].Fd, Hub.Handle("/api/state", {}, Sse[i].Token, Now)))
+				std::map<std::string, std::string> Sq;
+				if (!Sse[i].Cita.empty()) Sq["cita"] = Sse[i].Cita;
+				if (!SendSse(Sse[i].Fd, Hub.Handle("/api/state", Sq, Sse[i].Token, Now)))
 				{
 					close(Sse[i].Fd);
 					Sse.erase(Sse.begin() + int(i));
@@ -1868,7 +2183,8 @@ static int RunServe(int Port, int DefaultBots, const std::string& WebDir)
 					"Access-Control-Allow-Origin: *\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n";
 				SendAll(C, Head);
 				SendSse(C, Hub.Handle("/api/state", Q, Tok, NowFn()));
-				Sse.push_back({ C, Tok });
+				const std::string Cita = Q.count("cita") ? NormCode(Q.at("cita")) : "";
+				Sse.push_back({ C, Tok, Cita });
 				continue;
 			}
 

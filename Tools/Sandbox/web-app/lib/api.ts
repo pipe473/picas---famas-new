@@ -24,10 +24,19 @@ export function roomCodeFromUrl(): string {
   return new URLSearchParams(window.location.search).get("sala")?.toUpperCase() ?? "";
 }
 
+/** Código de cita agendada en la URL (`?cita=ABCD`). */
+export function scheduleCodeFromUrl(): string {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get("cita")?.toUpperCase() ?? "";
+}
+
 function withTok(path: string) {
   const t = getToken();
-  if (!t) return path;
-  return `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(t)}`;
+  let out = path;
+  if (t) out += `${out.includes("?") ? "&" : "?"}token=${encodeURIComponent(t)}`;
+  const cita = scheduleCodeFromUrl();
+  if (cita) out += `${out.includes("?") ? "&" : "?"}cita=${encodeURIComponent(cita)}`;
+  return out;
 }
 
 export async function api<T = ApiResult>(path: string, opts?: { skipToken?: boolean }): Promise<T | null> {
@@ -60,8 +69,24 @@ export function fetchRanking(limit = 10, id = 0, name = "") {
 export function clearInviteUrl() {
   if (typeof window === "undefined") return;
   const u = new URL(window.location.href);
-  if (!u.searchParams.has("sala")) return;
+  let changed = false;
+  for (const k of ["sala", "cita"] as const) {
+    if (u.searchParams.has(k)) {
+      u.searchParams.delete(k);
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  const q = u.searchParams.toString();
+  window.history.replaceState({}, "", u.pathname + (q ? `?${q}` : "") + u.hash);
+}
+
+export function setScheduleUrl(code: string) {
+  if (typeof window === "undefined") return;
+  const u = new URL(window.location.href);
   u.searchParams.delete("sala");
+  if (code) u.searchParams.set("cita", code);
+  else u.searchParams.delete("cita");
   const q = u.searchParams.toString();
   window.history.replaceState({}, "", u.pathname + (q ? `?${q}` : "") + u.hash);
 }
@@ -70,6 +95,42 @@ export async function goHome() {
   await leaveRoom();
   setToken("");
   clearInviteUrl();
+}
+
+export type ScheduleResult = ApiResult & {
+  token?: string;
+  code?: string;
+  when?: number;
+  status?: string;
+  decision?: string;
+  roomCode?: string;
+};
+
+/** Propone una partida a una fecha/hora (Unix s). Devuelve código para compartir `?cita=`. */
+export function createSchedule(name: string, when: number) {
+  const q = new URLSearchParams({ name, when: String(when) });
+  return api<ScheduleResult>(`/api/schedule/create?${q.toString()}`, { skipToken: true });
+}
+
+export function respondSchedule(code: string, name: string, decision: "approve" | "reject") {
+  const q = new URLSearchParams({ code, name, decision });
+  return api<ScheduleResult>(`/api/schedule/respond?${q.toString()}`);
+}
+
+export function cancelSchedule() {
+  return api("/api/schedule/cancel");
+}
+
+export function ackNotification(id = 0) {
+  return api(`/api/notify/ack?id=${id}`);
+}
+
+export function scheduleShareUrl(code: string) {
+  if (typeof window === "undefined") return code;
+  const u = new URL(window.location.href);
+  u.searchParams.delete("sala");
+  u.searchParams.set("cita", code);
+  return u.toString();
 }
 
 export function startSolo(name: string, bots = 3) {
