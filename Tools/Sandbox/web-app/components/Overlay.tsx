@@ -2,12 +2,29 @@
 
 import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
 import { sfx } from "@/lib/audio";
-import { abortMatch, configRoom, createRoom, goHome, joinRoom, roomCodeFromUrl, setToken, startMatch, startSolo } from "@/lib/api";
+import {
+  abortMatch,
+  cancelSchedule,
+  clearInviteUrl,
+  configRoom,
+  createRoom,
+  createSchedule,
+  goHome,
+  joinRoom,
+  respondSchedule,
+  roomCodeFromUrl,
+  scheduleCodeFromUrl,
+  setScheduleUrl,
+  setToken,
+  startMatch,
+  startSolo,
+} from "@/lib/api";
 import { useNow } from "@/lib/clock";
+import { defaultScheduleLocal, formatWhen, localInputToUnix } from "@/lib/format";
 import { ShareInvite } from "@/components/ShareInvite";
 import { RankHead, RankingTabs, RoomRanking, SoloRanking } from "@/components/Ranking";
 import { TrophyIcon } from "@/components/Icons";
-import { COLORS, type GameState, type Pace, type TurnMode } from "@/lib/types";
+import { COLORS, type GameState, type Pace, type Schedule, type TurnMode } from "@/lib/types";
 
 const tone = (seat: number): CSSProperties => ({ ["--tone" as string]: COLORS[seat] });
 
@@ -231,7 +248,7 @@ function Waiting({ title, sub, ok }: { title: string; sub?: string; ok?: boolean
   );
 }
 
-function Join({ S }: { S: GameState }) {
+function Join({ S, onSchedule }: { S: GameState; onSchedule: () => void }) {
   const invited = !!roomCodeFromUrl();
   const busy = S.phase !== "lobby" && S.phase !== "none";
   const [name, setName] = useState("");
@@ -338,6 +355,9 @@ function Join({ S }: { S: GameState }) {
             <button type="button" className="btn ghost" onClick={() => void enterFriends()}>
               Crear sala para amigos
             </button>
+            <button type="button" className="btn ghost" onClick={onSchedule}>
+              Agendar partida
+            </button>
           </>
         )}
       </div>
@@ -357,6 +377,251 @@ function Join({ S }: { S: GameState }) {
           ) : null}
         </div>
       ) : null}
+    </>
+  );
+}
+
+/** Formulario para proponer fecha/hora y obtener un enlace de cita. */
+function ScheduleForm({ onBack }: { onBack: () => void }) {
+  const [name, setName] = useState("");
+  const [whenLocal, setWhenLocal] = useState(defaultScheduleLocal);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setErr("");
+    const when = localInputToUnix(whenLocal);
+    if (!when) {
+      setErr("Elige una fecha y hora válidas.");
+      return;
+    }
+    setBusy(true);
+    setToken("");
+    const r = await createSchedule(name.trim() || "Jugador", when);
+    setBusy(false);
+    if (!r?.ok || !r.token || !r.code) {
+      setErr(r?.error ?? "No se pudo agendar.");
+      return;
+    }
+    setToken(r.token);
+    setScheduleUrl(r.code);
+  };
+
+  return (
+    <>
+      <h3>Agendar partida</h3>
+      <div className="title">
+        Picas <em>y</em> Famas
+      </div>
+      <p className="lead">Elige cuándo queréis jugar y comparte el enlace. Tus amigos podrán aceptar o rechazar, y tú recibirás un aviso en ambos casos.</p>
+      <div className="form">
+        <label className="field">
+          <span>Tu nombre</span>
+          <input className="namein" maxLength={16} placeholder="Jugador" autoComplete="nickname" value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Fecha y hora</span>
+          <input className="namein" type="datetime-local" value={whenLocal} onChange={(e) => setWhenLocal(e.target.value)} />
+        </label>
+      </div>
+      {err ? (
+        <div className="form-err" role="alert">
+          {err}
+        </div>
+      ) : null}
+      <div className="cta">
+        <button type="button" className="btn" disabled={busy} onClick={() => void submit()}>
+          Crear cita
+        </button>
+        <button type="button" className="btn ghost" onClick={onBack}>
+          Volver
+        </button>
+      </div>
+    </>
+  );
+}
+
+function decisionLabel(d: string) {
+  if (d === "approved") return "Aceptó";
+  if (d === "rejected") return "Rechazó";
+  return "Pendiente";
+}
+
+/** Vista de una cita: anfitrión espera respuestas; invitado aprueba o rechaza. */
+function ScheduleView({ sched, onForm }: { sched: Schedule; onForm?: () => void }) {
+  const [name, setName] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const whenTxt = formatWhen(sched.when);
+  const approved = sched.guests.filter((g) => g.decision === "approved").length;
+  const rejected = sched.guests.filter((g) => g.decision === "rejected").length;
+
+  const respond = async (decision: "approve" | "reject") => {
+    setErr("");
+    setBusy(true);
+    const r = await respondSchedule(sched.code, name.trim() || "Jugador", decision);
+    setBusy(false);
+    if (!r?.ok || !r.token) {
+      setErr(r?.error ?? "No se pudo responder.");
+      return;
+    }
+    setToken(r.token);
+    sfx[decision === "approve" ? "fama" : "bad"]();
+  };
+
+  const enterRoom = async () => {
+    if (!sched.roomCode) return;
+    setErr("");
+    setBusy(true);
+    const r = await joinRoom(name.trim() || "Jugador", sched.roomCode);
+    setBusy(false);
+    if (!r?.ok || !r.token) {
+      setErr(r?.error ?? "No se pudo entrar a la sala.");
+      return;
+    }
+    setToken(r.token);
+    clearInviteUrl();
+  };
+
+  const cancel = async () => {
+    setBusy(true);
+    await cancelSchedule();
+    setBusy(false);
+  };
+
+  const leaveCita = () => {
+    setToken("");
+    clearInviteUrl();
+    onForm?.();
+  };
+
+  if (sched.isHost) {
+    return (
+      <>
+        <h3>Partida agendada</h3>
+        <div className="title code-title">{sched.code}</div>
+        <p className="lead">
+          Quedada el <b>{whenTxt}</b>. Comparte el enlace: cuando alguien acepte o rechace, te avisamos aquí.
+        </p>
+        <ShareInvite code={sched.code} kind="schedule" whenLabel={whenTxt} />
+        {sched.status === "cancelled" ? (
+          <Waiting title="Cita cancelada" sub="Puedes crear otra desde el menú." />
+        ) : sched.status === "ready" ? (
+          <Waiting ok title="Alguien ha aceptado" sub="La sala ya está lista: te llevamos allí en cuanto llegue la confirmación." />
+        ) : (
+          <Waiting
+            title={approved + rejected === 0 ? "Esperando respuestas…" : `${approved} aceptaron · ${rejected} rechazaron`}
+            sub="Mantén esta pantalla abierta para ver los avisos al momento."
+          />
+        )}
+        {sched.guests.length ? (
+          <ul className="sched-guests">
+            {sched.guests.map((g, i) => (
+              <li key={`${g.name}-${i}`} className={g.decision || "pending"}>
+                <span>{g.name}</span>
+                <b>{decisionLabel(g.decision)}</b>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="cta">
+          {sched.status !== "cancelled" ? (
+            <button type="button" className="btn ghost" disabled={busy} onClick={() => void cancel()}>
+              Cancelar cita
+            </button>
+          ) : null}
+          <button type="button" className="btn ghost" onClick={leaveCita}>
+            Volver al menú
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  if (sched.status === "cancelled") {
+    return (
+      <>
+        <h3>Cita cancelada</h3>
+        <p className="lead">
+          {sched.hostName} canceló la partida del <b>{whenTxt}</b>.
+        </p>
+        <div className="cta">
+          <button type="button" className="btn" onClick={leaveCita}>
+            Volver al menú
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  if (sched.myDecision === "rejected") {
+    return (
+      <>
+        <h3>Partida rechazada</h3>
+        <p className="lead">
+          Has rechazado la partida con <b>{sched.hostName}</b> del {whenTxt}. También se lo hemos avisado.
+        </p>
+        <div className="cta">
+          <button type="button" className="btn" onClick={leaveCita}>
+            Volver al menú
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  if (sched.myDecision === "approved") {
+    return (
+      <>
+        <h3>Partida aceptada</h3>
+        <p className="lead">
+          Quedada con <b>{sched.hostName}</b> el {whenTxt}. {sched.roomCode ? "La sala ya está abierta." : "Cuando el anfitrión abra la sala podrás entrar."}
+        </p>
+        {err ? (
+          <div className="form-err" role="alert">
+            {err}
+          </div>
+        ) : null}
+        <div className="cta">
+          {sched.roomCode ? (
+            <button type="button" className="btn" disabled={busy} onClick={() => void enterRoom()}>
+              Entrar a la sala
+            </button>
+          ) : null}
+          <button type="button" className="btn ghost" onClick={leaveCita}>
+            Volver al menú
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <h3>Te proponen una partida</h3>
+      <div className="title code-title">{sched.code}</div>
+      <p className="lead">
+        <b>{sched.hostName || "Un amigo"}</b> quiere jugar el <b>{whenTxt}</b>. Acepta o rechaza: en ambos casos recibirá un aviso.
+      </p>
+      <div className="form">
+        <label className="field">
+          <span>Tu nombre</span>
+          <input className="namein" maxLength={16} placeholder="Jugador" autoComplete="nickname" value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+      </div>
+      {err ? (
+        <div className="form-err" role="alert">
+          {err}
+        </div>
+      ) : null}
+      <div className="cta">
+        <button type="button" className="btn" disabled={busy} onClick={() => void respond("approve")}>
+          Aceptar partida
+        </button>
+        <button type="button" className="btn ghost" disabled={busy} onClick={() => void respond("reject")}>
+          Rechazar
+        </button>
+      </div>
     </>
   );
 }
@@ -586,11 +851,55 @@ function Lobby({ S }: { S: GameState }) {
 }
 
 export const Overlay = memo(function Overlay({ S, onRanking }: { S: GameState; onRanking: () => void }) {
+  const [scheduling, setScheduling] = useState(false);
+  const hasCita = !!scheduleCodeFromUrl() || !!S.schedule;
+
+  useEffect(() => {
+    if (S.joined && scheduleCodeFromUrl()) clearInviteUrl();
+  }, [S.joined]);
+
   if (S.joined && S.phase === "playing") return null;
   return (
     <div className="overlay on">
       <div className="card" role="dialog" aria-modal="true">
-        {!S.joined ? <Join S={S} /> : null}
+        {!S.joined ? (
+          S.schedule ? (
+            <ScheduleView sched={S.schedule} onForm={() => setScheduling(false)} />
+          ) : scheduling || (hasCita && !S.schedule) ? (
+            hasCita && !S.schedule ? (
+              <>
+                <h3>Cita no encontrada</h3>
+                <p className="lead">Ese enlace ya no vale o el servidor se reinició. Pide uno nuevo o agenda otra partida.</p>
+                <div className="cta">
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      clearInviteUrl();
+                      setScheduling(true);
+                    }}
+                  >
+                    Agendar partida
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    onClick={() => {
+                      clearInviteUrl();
+                      setScheduling(false);
+                    }}
+                  >
+                    Volver al menú
+                  </button>
+                </div>
+              </>
+            ) : (
+              <ScheduleForm onBack={() => setScheduling(false)} />
+            )
+          ) : (
+            <Join S={S} onSchedule={() => setScheduling(true)} />
+          )
+        ) : null}
         {S.joined && S.phase === "lobby" ? <Lobby S={S} /> : null}
         {S.joined && S.phase === "countdown" ? <Countdown S={S} /> : null}
         {S.joined && S.phase === "summary" ? <Summary S={S} /> : null}

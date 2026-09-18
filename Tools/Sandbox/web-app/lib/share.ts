@@ -1,9 +1,15 @@
-import { shareUrl } from "./api";
+import { scheduleShareUrl, shareUrl } from "./api";
 
 /** Texto de la invitación: código a mano por si el enlace no se abre, y el enlace para entrar de un toque. */
 export function inviteText(code: string) {
   const url = shareUrl(code);
   return `¡Juega conmigo a Picas y Famas! 🔢\nCódigo de sala: ${code}\nEntra aquí: ${url}`;
+}
+
+/** Invitación a una partida agendada: el amigo aprueba o rechaza desde el enlace. */
+export function scheduleInviteText(code: string, whenLabel: string) {
+  const url = scheduleShareUrl(code);
+  return `¿Jugamos a Picas y Famas el ${whenLabel}? 🔢\nCódigo de cita: ${code}\nAcepta o rechaza aquí: ${url}`;
 }
 
 /**

@@ -10,6 +10,7 @@ const KIND: Record<string, { label: string; icon: ReactNode }> = {
   hot: { label: "Jugada", icon: <SendIcon /> },
   trick: { label: "Engaño", icon: <MaskIcon /> },
   info: { label: "Aviso", icon: <LockIcon /> },
+  ok: { label: "Cita", icon: <TrophyIcon /> },
 };
 
 /** Banners de evento: entran desde la derecha, cada tipo con su acento y su icono. */

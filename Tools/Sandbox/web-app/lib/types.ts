@@ -38,6 +38,34 @@ export type BoardEntry = {
 export type PrivateEntry = { seq: number; guess: string; f: number; p: number };
 export type LogEvent = { id: number; text: string };
 
+/** Aviso in-app (cita aceptada/rechazada, cancelación…). Llega por SSE en /api/state. */
+export type AppNotification = {
+  id: number;
+  text: string;
+  kind: "gold" | "bad" | "info" | string;
+  ts: number;
+};
+
+/** Respuesta de un invitado a una partida agendada. */
+export type ScheduleGuest = {
+  name: string;
+  decision: "" | "approved" | "rejected" | string;
+  at: number;
+};
+
+/** Cita compartida (?cita=CODE): el anfitrión propone fecha/hora; los amigos aprueban o rechazan. */
+export type Schedule = {
+  code: string;
+  hostName: string;
+  when: number;
+  status: "open" | "ready" | "cancelled" | string;
+  roomCode: string;
+  isHost: boolean;
+  myDecision: "" | "approved" | "rejected" | string;
+  createdAt: number;
+  guests: ScheduleGuest[];
+};
+
 /** Fila de la clasificación de la sala: acumulada entre partidas con amigos, por nombre. `seat` = -1 si ya no está. */
 export type RoomStanding = {
   pos: number;
@@ -101,6 +129,10 @@ export type GameState = {
   entries: BoardEntry[];
   private: PrivateEntry[];
   events: LogEvent[];
+  /** Avisos pendientes para este token (p. ej. cita aceptada o rechazada). */
+  notifications?: AppNotification[];
+  /** Cita en curso (anfitrión o invitado vía ?cita=). */
+  schedule?: Schedule | null;
   /** La última partida fue individual (1 humano + bots) y se registró en el ranking global. */
   solo: boolean;
   soloRank: number;

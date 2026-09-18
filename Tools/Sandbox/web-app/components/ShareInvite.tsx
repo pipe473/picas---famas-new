@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { shareUrl } from "@/lib/api";
-import { canNativeShare, copyText, inviteText, nativeShare, telegramUrl, whatsappUrl } from "@/lib/share";
+import { scheduleShareUrl, shareUrl } from "@/lib/api";
+import {
+  canNativeShare,
+  copyText,
+  inviteText,
+  nativeShare,
+  scheduleInviteText,
+  telegramUrl,
+  whatsappUrl,
+} from "@/lib/share";
 
 type Feedback = "link" | "code" | "shared" | null;
 
@@ -39,14 +47,25 @@ function LinkIcon() {
 }
 
 /**
- * Invitar a la sala: WhatsApp y Telegram abren un mensaje listo con el código y el enlace,
- * "Compartir…" usa la hoja del sistema (donde exista) y siempre queda copiar el enlace o el código a mano.
+ * Invitar a la sala o a una cita agendada: WhatsApp/Telegram con mensaje listo,
+ * "Compartir…" con la hoja del sistema, y copiar enlace o código.
  */
-export function ShareInvite({ code, compact, onInvite }: { code: string; compact?: boolean; onInvite?: () => void }) {
+export function ShareInvite({
+  code,
+  compact,
+  onInvite,
+  kind = "room",
+  whenLabel,
+}: {
+  code: string;
+  compact?: boolean;
+  onInvite?: () => void;
+  kind?: "room" | "schedule";
+  whenLabel?: string;
+}) {
   const [fb, setFb] = useState<Feedback>(null);
   const [native, setNative] = useState(false);
 
-  // `navigator` no existe en el export estático; se comprueba ya montado.
   useEffect(() => setNative(canNativeShare()), []);
 
   useEffect(() => {
@@ -55,11 +74,16 @@ export function ShareInvite({ code, compact, onInvite }: { code: string; compact
     return () => window.clearTimeout(t);
   }, [fb]);
 
-  const text = inviteText(code);
+  const isSchedule = kind === "schedule";
+  const url = isSchedule ? scheduleShareUrl(code) : shareUrl(code);
+  const text = isSchedule ? scheduleInviteText(code, whenLabel || "pronto") : inviteText(code);
+  const tgHref = isSchedule
+    ? `https://t.me/share/url?${new URLSearchParams({ url, text: `¿Jugamos a Picas y Famas${whenLabel ? ` el ${whenLabel}` : ""}? Código: ${code}` }).toString()}`
+    : telegramUrl(code);
   const sent = () => onInvite?.();
 
   const copyLink = async () => {
-    await copyText(shareUrl(code));
+    await copyText(url);
     setFb("link");
     sent();
   };
@@ -69,6 +93,17 @@ export function ShareInvite({ code, compact, onInvite }: { code: string; compact
     sent();
   };
   const share = async () => {
+    if (isSchedule) {
+      if (!canNativeShare()) return;
+      try {
+        await navigator.share({ title: "Picas y Famas", text, url });
+        setFb("shared");
+        sent();
+      } catch {
+        /* cancelado */
+      }
+      return;
+    }
     if (await nativeShare(code)) {
       setFb("shared");
       sent();
@@ -76,12 +111,12 @@ export function ShareInvite({ code, compact, onInvite }: { code: string; compact
   };
 
   return (
-    <div className={`share${compact ? " compact" : ""}`} aria-label="Invitar jugadores">
+    <div className={`share${compact ? " compact" : ""}`} aria-label={isSchedule ? "Invitar a la cita" : "Invitar jugadores"}>
       <a className="share-btn wa" href={whatsappUrl(text)} target="_blank" rel="noopener noreferrer" onClick={sent}>
         <WhatsAppIcon />
         WhatsApp
       </a>
-      <a className="share-btn tg" href={telegramUrl(code)} target="_blank" rel="noopener noreferrer" onClick={sent}>
+      <a className="share-btn tg" href={tgHref} target="_blank" rel="noopener noreferrer" onClick={sent}>
         <TelegramIcon />
         Telegram
       </a>
